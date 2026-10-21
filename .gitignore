@@ -10,3 +10,7 @@
 /docs/SPEC.md
 /docs/DESIGN.md
 /docs/PARITY.md
+*.moc
+/test_canvas_regression
+/test_workflow
+/test_shortcuts
