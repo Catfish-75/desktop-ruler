@@ -1,0 +1,10 @@
+*.o
+/desktop-ruler
+/test_ui
+/test_geometry
+/tests/test_ui
+/tests/test_geometry
+/artifacts/
+/docs/SPEC.md
+/docs/DESIGN.md
+/docs/PARITY.md

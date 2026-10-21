@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Desktop Ruler
+Name[ru]=Экранная линейка
+Comment=Measure distances, areas and angles on a captured screen
+Comment[ru]=Измерение расстояний, площадей и углов на снимке экрана
+Exec=desktop-ruler
+TryExec=desktop-ruler
+Icon=desktop-ruler
+Terminal=false
+Categories=Utility;
