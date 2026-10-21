@@ -6,6 +6,7 @@
 #include <QPainter>
 #include <QTest>
 #include <QTemporaryDir>
+#include <QTableWidget>
 #include <cstdio>
 #define CHECK(condition) do { if (!(condition)) { std::fprintf(stderr, "test_ui failed at line %d: %s\n", __LINE__, #condition); return 1; } } while (false)
 #include <cmath>
@@ -63,11 +64,16 @@ int main(int argc, char** argv) {
     click(c, {13,14}, blank.size());
     QTest::keyClick(c, Qt::Key_Return);
     CHECK(window.historyCount() == 1);
+    auto* history = window.findChild<QTableWidget*>();
+    CHECK(history && history->item(0, 0) && history->item(0, 1));
+    CHECK(history->item(0, 0)->flags() & Qt::ItemIsEditable);
+    CHECK(!(history->item(0, 1)->flags() & Qt::ItemIsEditable));
+    history->item(0, 0)->setText(QStringLiteral("=edited"));
     window.copyResults();
     const QString copied = QGuiApplication::clipboard()->text();
     const QStringList firstRow = copied.split('\n').at(1).split('\t');
     CHECK(firstRow.size() == 10);
-    CHECK(firstRow[0] == QStringLiteral("'=critical"));
+    CHECK(firstRow[0] == QStringLiteral("'=edited"));
     CHECK(std::abs(firstRow[2].toDouble()-5) < 1e-9);
     CHECK(std::abs(firstRow[6].toDouble()-2) < 1e-9);
     CHECK(std::abs(firstRow[8].toDouble()-10) < 1e-9);
@@ -79,7 +85,7 @@ int main(int argc, char** argv) {
     CHECK(window.exportCsv(csv));
     CHECK(window.saveSelectedImage(png));
     QFile exported(csv); CHECK(exported.open(QIODevice::ReadOnly));
-    CHECK(exported.readAll().contains("'=critical"));
+    CHECK(exported.readAll().contains("'=edited"));
     QImage marked(png); CHECK(!marked.isNull() && marked.width() < blank.width());
 
     window.nextMeasurement();
@@ -144,6 +150,24 @@ int main(int argc, char** argv) {
     QTest::mouseMove(c, widgetPoint(c,{300,200},blank.size()));
     QTest::keyClick(c, Qt::Key_Escape);
     CHECK(window.historyCount() == 6 && !c->isVisible());
+
+    Canvas magnifier;
+    magnifier.resize(400, 300);
+    QImage scaledPixels(500, 375, QImage::Format_ARGB32);
+    scaledPixels.fill(Qt::black);
+    scaledPixels.setPixelColor(102, 102, Qt::red);
+    scaledPixels.setPixelColor(103, 103, Qt::green);
+    magnifier.setImage(scaledPixels);
+    magnifier.setMode(ruler::Mode::Magnifier);
+    magnifier.show();
+    CHECK(QTest::qWaitForWindowExposed(&magnifier));
+    QTest::mouseClick(&magnifier, Qt::LeftButton, Qt::NoModifier, QPoint(82, 82));
+    const QImage magnified = magnifier.grab().toImage();
+    // 82/400 maps to image coordinate 102.5: the cursor is inside source pixel 102.
+    // Sample inside that enlarged pixel, clear of the center crosshair.
+    const QColor centerPixel = magnified.pixelColor(298, 198);
+    CHECK(centerPixel.red() > 200 && centerPixel.green() < 40);
+    magnifier.hide();
 
     window.clearHistory();
     CHECK(window.historyCount() == 0);

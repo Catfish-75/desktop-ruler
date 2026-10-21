@@ -273,8 +273,8 @@ void Canvas::drawMagnifier(QPainter& p) const {
     QRect box(QPoint(atRight ? 16 : width()-boxSize.width()-16,
                      atTop ? height()-boxSize.height()-16 : 16), boxSize);
     if (box.left() < 0 || box.bottom() > height()) return;
-    const QPoint center(qBound(0, qRound(cursor_.x()), image_.width()-1),
-                        qBound(0, qRound(cursor_.y()), image_.height()-1));
+    const QPoint center(qBound(0, static_cast<int>(std::floor(cursor_.x())), image_.width()-1),
+                        qBound(0, static_cast<int>(std::floor(cursor_.y())), image_.height()-1));
     p.fillRect(box.adjusted(-3,-3,3,3), QColor(10,14,18,230));
     p.setRenderHint(QPainter::SmoothPixmapTransform, false);
     p.drawImage(box, image_, QRect(center.x()-half, center.y()-half, sourceSide, sourceSide));

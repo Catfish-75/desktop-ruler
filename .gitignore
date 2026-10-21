@@ -1,7 +1,9 @@
 *.o
+*.d
 /desktop-ruler
 /test_ui
 /test_geometry
+/test_capture
 /tests/test_ui
 /tests/test_geometry
 /artifacts/

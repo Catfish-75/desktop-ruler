@@ -21,6 +21,8 @@ Choose a screen and capture it, or open an image. Select a mode and start measur
 
 Pixel values refer to pixels in the image. Calibration converts those values using a known length and a unit entered by the user; it does not estimate the monitor’s physical DPI. Manually traced polygon area and perimeter use the traced contour. Automatic color-region area counts occupied pixels, while its perimeter counts exposed pixel edges, including hole boundaries.
 
+Double-click a history label (or press F2) to rename a completed measurement.
+
 Results and annotated screenshots stay in session history until cleared or the app exits. Copy selected or all rows as TSV, export results as CSV, and save annotated PNG images when needed. History is not retained between runs.
 
 Screen capture uses `grim` and targets one selected output per measurement session. The app is intended for grim-compatible Wayland compositors such as Hyprland. Opening a local image does not require screen capture.
@@ -53,6 +55,8 @@ make test
 Выберите экран и сделайте снимок либо откройте изображение. Выберите режим и начните измерение. Enter или правая кнопка завершает; Escape отменяет или возвращает; Backspace или Ctrl+Z отменяет последнюю точку или штрих. «Следующее измерение» использует текущее изображение, «Новый снимок» захватывает экран заново.
 
 Пиксельные значения относятся к пикселям изображения. Калибровка переводит их в заданные пользователем единицы по известной длине; она не определяет физический DPI монитора. Площадь и периметр вручную обведённого контура рассчитываются по его геометрии. Автоматическая цветовая область считает занятые пиксели, а её периметр — открытые стороны пикселей, включая границы отверстий.
+
+Для переименования готового измерения дважды щёлкните по метке в истории или нажмите F2.
 
 Результаты и изображения с разметкой доступны в истории до её очистки или выхода из программы. Можно копировать выбранные или все строки как TSV, сохранять результаты в CSV и изображения в PNG. Между запусками история не сохраняется.
 

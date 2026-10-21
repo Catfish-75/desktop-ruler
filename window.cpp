@@ -125,9 +125,13 @@ RulerWindow::RulerWindow(QWidget* parent) : QMainWindow(parent), canvas_(new Can
     history_ = new QTableWidget(0, 5);
     history_->setSelectionBehavior(QAbstractItemView::SelectRows);
     history_->setSelectionMode(QAbstractItemView::SingleSelection);
-    history_->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    history_->setEditTriggers(QAbstractItemView::DoubleClicked | QAbstractItemView::EditKeyPressed);
     history_->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
     history_->setMinimumHeight(115);
+    connect(history_, &QTableWidget::itemChanged, this, [this](QTableWidgetItem* item) {
+        if (item && item->column() == 0 && item->row() >= 0 && item->row() < entries_.size())
+            entries_[item->row()].name = item->text().trimmed();
+    });
     root->addWidget(history_, 1);
     auto* exports = new QHBoxLayout;
     showButton_ = new QPushButton; saveButton_ = new QPushButton;
@@ -246,7 +250,11 @@ void RulerWindow::populateScreens() {
 void RulerWindow::capture() {
     populateScreens();
     const auto screens = QGuiApplication::screens();
-    if (screenBox_->currentIndex() < 0 || screenBox_->currentIndex() >= screens.size()) return;
+    if (screenBox_->currentIndex() < 0 || screenBox_->currentIndex() >= screens.size()) {
+        status_->setText(trText("Нет доступного экрана для захвата", "No screen is available to capture"));
+        show(); raise(); activateWindow();
+        return;
+    }
     QPointer<QScreen> screen = screens[screenBox_->currentIndex()];
     const QString output = screen->name();
     const QString scale = QString::number(screen->devicePixelRatio(), 'g', 8);
@@ -392,7 +400,11 @@ void RulerWindow::refreshHistory() {
             calibrated = QString::number(m.length*entry.scale,'f',2);
         }
         const QStringList cells{entry.name, modeName(entry.kind, english_), raw, calibrated, unit};
-        for (int j=0; j<cells.size(); ++j) history_->setItem(i,j,new QTableWidgetItem(cells[j]));
+        for (int j=0; j<cells.size(); ++j) {
+            auto* item = new QTableWidgetItem(cells[j]);
+            if (j != 0) item->setFlags(item->flags() & ~Qt::ItemIsEditable);
+            history_->setItem(i,j,item);
+        }
     }
 }
 int RulerWindow::historyCount() const { return entries_.size(); }
@@ -484,13 +496,20 @@ QString RulerWindow::displayError(const QString& error) const {
         {"At least two points are required", "Нужны минимум две точки"},
         {"At least three points are required", "Нужны минимум три точки"},
         {"At least one point is required", "Нужна минимум одна точка"},
+        {"Coordinates must be finite", "Координаты должны быть конечными числами"},
         {"Path length must be positive", "Длина пути должна быть больше нуля"},
+        {"Path length is out of range", "Длина пути выходит за допустимый диапазон"},
+        {"Perimeter is out of range", "Периметр выходит за допустимый диапазон"},
+        {"Adjacent polygon edges must not overlap", "Соседние рёбра контура не должны накладываться"},
         {"Polygon edges must not cross or touch", "Контур не должен пересекаться или касаться себя"},
         {"Polygon edges must have positive finite length", "У каждого ребра контура должна быть положительная длина"},
         {"Polygon area must be positive and finite", "Площадь контура должна быть больше нуля"},
         {"Angle requires a vertex and two ray points", "Для угла нужны вершина и две точки лучей"},
         {"Angle rays must have positive length", "Луч угла должен иметь положительную длину"},
+        {"Angle is out of range", "Угол выходит за допустимый диапазон"},
+        {"Unsupported geometry mode", "Этот режим геометрии не поддерживается"},
         {"Image is empty", "Изображение пусто"},
+        {"Tolerance must be between 0 and 255", "Допуск должен быть от 0 до 255"},
         {"Seed is outside the image", "Начальная точка вне изображения"},
         {"Could not allocate region mask", "Не удалось выделить память для области"},
         {"Could not convert image for region selection", "Не удалось подготовить изображение для области"}
