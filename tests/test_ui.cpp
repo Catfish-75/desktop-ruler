@@ -2,11 +2,15 @@
 #include "../window.h"
 #include <QApplication>
 #include <QClipboard>
+#include <QDialog>
+#include <QDialogButtonBox>
 #include <QFile>
 #include <QPainter>
+#include <QPushButton>
 #include <QTest>
 #include <QTemporaryDir>
 #include <QTableWidget>
+#include <QTimer>
 #include <cstdio>
 #define CHECK(condition) do { if (!(condition)) { std::fprintf(stderr, "test_ui failed at line %d: %s\n", __LINE__, #condition); return 1; } } while (false)
 #include <cmath>
@@ -19,6 +23,30 @@ static QPoint widgetPoint(Canvas* canvas, QPointF imagePoint, QSize imageSize) {
 }
 static void click(Canvas* canvas, QPointF imagePoint, QSize imageSize) {
     QTest::mouseClick(canvas, Qt::LeftButton, Qt::NoModifier, widgetPoint(canvas,imagePoint,imageSize));
+}
+
+static bool finishCalibration(Canvas* canvas) {
+    bool sawDialog = false;
+    QTimer responder;
+    responder.setInterval(10);
+    QObject::connect(&responder, &QTimer::timeout, [&] {
+        auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
+        if (!dialog || dialog->objectName() != QStringLiteral("calibrationDialog") || sawDialog) return;
+        sawDialog = true;
+        if (auto* buttons = dialog->findChild<QDialogButtonBox*>())
+            buttons->button(QDialogButtonBox::Ok)->click();
+    });
+    QTimer bailout;
+    bailout.setSingleShot(true);
+    QObject::connect(&bailout, &QTimer::timeout, [] {
+        if (auto* modal = QApplication::activeModalWidget()) modal->close();
+    });
+    bailout.start(4000);
+    responder.start();
+    QTest::keyClick(canvas, Qt::Key_Return);
+    responder.stop();
+    bailout.stop();
+    return sawDialog;
 }
 
 int main(int argc, char** argv) {
@@ -54,18 +82,19 @@ int main(int argc, char** argv) {
     CHECK(QTest::qWaitForWindowExposed(c));
     click(c, {10,10}, blank.size());
     click(c, {13,14}, blank.size());
-    QTest::keyClick(c, Qt::Key_Return);
+    CHECK(finishCalibration(c));
     CHECK(window.historyCount() == 0);
 
-    window.setLabel(QStringLiteral("=critical"));
     window.selectMode(ruler::Mode::Path);
     window.nextMeasurement();
     click(c, {10,10}, blank.size());
     click(c, {13,14}, blank.size());
     QTest::keyClick(c, Qt::Key_Return);
     CHECK(window.historyCount() == 1);
+    window.setLabel(QStringLiteral("=critical"));
     auto* history = window.findChild<QTableWidget*>();
     CHECK(history && history->item(0, 0) && history->item(0, 1));
+    CHECK(history->item(0, 0)->text() == QStringLiteral("=critical"));
     CHECK(history->item(0, 0)->flags() & Qt::ItemIsEditable);
     CHECK(!(history->item(0, 1)->flags() & Qt::ItemIsEditable));
     history->item(0, 0)->setText(QStringLiteral("=edited"));
@@ -109,7 +138,7 @@ int main(int argc, char** argv) {
     window.selectMode(ruler::Mode::Calibrate);
     window.nextMeasurement();
     click(c,{10,10},blank.size()); click(c,{13,14},blank.size());
-    QTest::keyClick(c, Qt::Key_Return);
+    CHECK(finishCalibration(c));
     CHECK(window.historyCount() == 2);
     window.copyResults();
     const QStringList afterScale = QGuiApplication::clipboard()->text().trimmed().split('\n');

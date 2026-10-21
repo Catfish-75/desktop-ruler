@@ -31,6 +31,8 @@
 #include <QWindow>
 #include <QBuffer>
 #include <QDialog>
+#include <QDialogButtonBox>
+#include <QFormLayout>
 #include <QAction>
 
 #include <algorithm>
@@ -69,9 +71,9 @@ RulerWindow::RulerWindow(QWidget* parent)
           if (capturePending_ || canvas_->isVisible() || QApplication::activeModalWidget()) return;
           if (action == ruler::CaptureShortcutAction) { capture(); return; }
           if (action == ruler::HistoryShortcutAction) {
+              if (entries_.isEmpty()) return;
               showControls();
-              if (!entries_.isEmpty()) history_->selectRow(entries_.size()-1);
-              history_->setFocus();
+              showHistory();
               return;
           }
           if (action >= 0 && action <= static_cast<int>(ruler::Mode::Magnifier)) {
@@ -113,28 +115,20 @@ RulerWindow::RulerWindow(QWidget* parent)
     modeLabel_ = new QLabel; nameLabel_ = new QLabel;
     optionsButton_ = new QPushButton;
     modeRow->addWidget(modeLabel_); modeRow->addWidget(modeBox_, 2);
-    modeRow->addWidget(nameLabel_); modeRow->addWidget(label_, 2);
     modeRow->addWidget(optionsButton_);
     root->addLayout(modeRow);
 
-    knownLength_ = new QDoubleSpinBox; knownLength_->setRange(0.000001, 1e12);
-    knownLength_->setDecimals(6); knownLength_->setValue(1);
-    unit_ = new QLineEdit(QStringLiteral("mm")); unit_->setMaxLength(32);
     tolerance_ = new QSpinBox; tolerance_->setRange(0,255);
     zoom_ = new QSpinBox; zoom_->setRange(2,24); zoom_->setValue(8);
-    knownLabel_ = new QLabel;
     toleranceLabel_ = new QLabel; zoomLabel_ = new QLabel;
     auto* settings = new QHBoxLayout;
-    knownWidget_ = new QWidget;
-    auto* knownRow = new QHBoxLayout(knownWidget_); knownRow->setContentsMargins(0, 0, 0, 0);
-    knownRow->addWidget(knownLabel_); knownRow->addWidget(knownLength_); knownRow->addWidget(unit_);
     toleranceWidget_ = new QWidget;
     auto* toleranceRow = new QHBoxLayout(toleranceWidget_); toleranceRow->setContentsMargins(0, 0, 0, 0);
     toleranceRow->addWidget(toleranceLabel_); toleranceRow->addWidget(tolerance_);
     zoomWidget_ = new QWidget;
     auto* zoomRow = new QHBoxLayout(zoomWidget_); zoomRow->setContentsMargins(0, 0, 0, 0);
     zoomRow->addWidget(zoomLabel_); zoomRow->addWidget(zoom_);
-    settings->addWidget(knownWidget_); settings->addWidget(toleranceWidget_);
+    settings->addWidget(toleranceWidget_);
     settings->addWidget(zoomWidget_); settings->addStretch(1);
     root->addLayout(settings);
     hintLabel_ = new QLabel;
@@ -146,18 +140,31 @@ RulerWindow::RulerWindow(QWidget* parent)
     scaleLine->addWidget(scaleLabel_, 1); scaleLine->addWidget(resetButton_);
     root->addLayout(scaleLine);
 
-    auto* actions = new QHBoxLayout;
-    measureButton_ = new QPushButton;
-    actions->addWidget(measureButton_);
-    root->addLayout(actions);
+    resultWidget_ = new QWidget;
+    auto* resultLayout = new QVBoxLayout(resultWidget_);
+    resultLayout->setContentsMargins(0, 0, 0, 0);
+    resultLayout->setSpacing(3);
     resultLabel_ = new QLabel;
     resultLabel_->setFrameShape(QFrame::StyledPanel);
     resultLabel_->setMargin(5);
     QFont resultFont = resultLabel_->font(); resultFont.setBold(true); resultLabel_->setFont(resultFont);
     resultLabel_->setWordWrap(true);
-    root->addWidget(resultLabel_);
+    resultLayout->addWidget(resultLabel_);
+    auto* nameRow = new QHBoxLayout;
+    nameRow->addWidget(nameLabel_); nameRow->addWidget(label_, 1);
+    resultLayout->addLayout(nameRow);
+    root->addWidget(resultWidget_);
+    resultWidget_->hide();
+    measureButton_ = new QPushButton;
+    root->addWidget(measureButton_);
     status_ = new QLabel;
     root->addWidget(status_);
+    historyButton_ = new QPushButton;
+    root->addWidget(historyButton_);
+    historyPanel_ = new QWidget;
+    auto* historyLayout = new QVBoxLayout(historyPanel_);
+    historyLayout->setContentsMargins(0, 0, 0, 0);
+    historyLayout->setSpacing(3);
     history_ = new QTableWidget(0, 5);
     history_->setSelectionBehavior(QAbstractItemView::SelectRows);
     history_->setSelectionMode(QAbstractItemView::SingleSelection);
@@ -165,26 +172,62 @@ RulerWindow::RulerWindow(QWidget* parent)
     history_->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
     history_->setMinimumHeight(60);
     connect(history_, &QTableWidget::itemChanged, this, [this](QTableWidgetItem* item) {
-        if (item && item->column() == 0 && item->row() >= 0 && item->row() < entries_.size())
+        if (item && item->column() == 0 && item->row() >= 0 && item->row() < entries_.size()) {
             entries_[item->row()].name = item->text().trimmed();
+            if (item->row() == entries_.size()-1) label_->setText(entries_.last().name);
+        }
     });
     connect(history_, &QTableWidget::itemSelectionChanged, this, [this] { updateAvailability(); });
-    root->addWidget(history_, 1);
-    auto* exports = new QGridLayout;
+    historyLayout->addWidget(history_, 1);
+    auto* historyActions = new QGridLayout;
     showButton_ = new QPushButton; saveButton_ = new QPushButton; saveSourceButton_ = new QPushButton;
     regionButton_ = new QPushButton;
     copyButton_ = new QPushButton; copyAllButton_ = new QPushButton;
     csvButton_ = new QPushButton; clearButton_ = new QPushButton;
-    exports->addWidget(showButton_, 0, 0);
-    exports->addWidget(saveButton_, 0, 1);
-    exports->addWidget(saveSourceButton_, 0, 2);
-    exports->addWidget(regionButton_, 0, 3);
-    exports->addWidget(copyButton_, 1, 0);
-    exports->addWidget(copyAllButton_, 1, 1);
-    exports->addWidget(csvButton_, 1, 2);
-    exports->addWidget(clearButton_, 1, 3);
-    for (int column = 0; column < 4; ++column) exports->setColumnStretch(column, 1);
-    root->addLayout(exports);
+    historyActions->addWidget(showButton_, 0, 0);
+    historyActions->addWidget(saveButton_, 0, 1);
+    historyActions->addWidget(copyButton_, 0, 2);
+    historyActions->addWidget(copyAllButton_, 1, 0);
+    historyActions->addWidget(csvButton_, 1, 1);
+    historyActions->addWidget(clearButton_, 1, 2);
+    for (int column = 0; column < 3; ++column) historyActions->setColumnStretch(column, 1);
+    historyLayout->addLayout(historyActions);
+    root->addWidget(historyPanel_);
+    historyPanel_->hide();
+    auto* sourceActions = new QHBoxLayout;
+    sourceActions->addWidget(saveSourceButton_);
+    sourceActions->addWidget(regionButton_);
+    root->addLayout(sourceActions);
+
+    calibrationDialog_ = new QDialog(this);
+    auto* calibrationLayout = new QVBoxLayout(calibrationDialog_);
+    calibrationPixels_ = new QLabel;
+    calibrationLayout->addWidget(calibrationPixels_);
+    auto* calibrationForm = new QFormLayout;
+    knownLength_ = new QDoubleSpinBox; knownLength_->setRange(0.000001, 1e12);
+    knownLength_->setDecimals(6); knownLength_->setValue(1);
+    unit_ = new QLineEdit(QStringLiteral("mm")); unit_->setMaxLength(32);
+    knownLabel_ = new QLabel; unitLabel_ = new QLabel;
+    calibrationForm->addRow(knownLabel_, knownLength_);
+    calibrationForm->addRow(unitLabel_, unit_);
+    calibrationLayout->addLayout(calibrationForm);
+    calibrationError_ = new QLabel;
+    calibrationLayout->addWidget(calibrationError_);
+    calibrationError_->hide();
+    calibrationButtons_ = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
+    calibrationLayout->addWidget(calibrationButtons_);
+    connect(calibrationButtons_, &QDialogButtonBox::accepted, calibrationDialog_, [this] {
+        if (unit_->text().trimmed().isEmpty()) {
+            calibrationError_->setText(trText("Укажите единицу измерения", "Enter a unit"));
+            calibrationError_->setAccessibleName(calibrationError_->text());
+            calibrationError_->show();
+            unit_->setFocus();
+            return;
+        }
+        calibrationDialog_->accept();
+    });
+    connect(calibrationButtons_, &QDialogButtonBox::rejected, calibrationDialog_, &QDialog::reject);
+    root->addStretch(1);
     auto* footer = new QHBoxLayout;
     helpButton_ = new QPushButton; shortcutsButton_ = new QPushButton;
     hideButton_ = new QPushButton; quitButton_ = new QPushButton;
@@ -202,6 +245,9 @@ RulerWindow::RulerWindow(QWidget* parent)
     identify(unit_, "knownUnit"); identify(tolerance_, "colorTolerance");
     identify(zoom_, "magnifierZoom"); identify(resetButton_, "resetScaleButton");
     identify(measureButton_, "measureButton"); identify(resultLabel_, "latestResult");
+    identify(resultWidget_, "resultPanel"); identify(historyButton_, "historyButton");
+    identify(historyPanel_, "historyPanel"); identify(calibrationDialog_, "calibrationDialog");
+    identify(calibrationPixels_, "calibrationPixels"); identify(calibrationError_, "calibrationError");
     identify(sourceLabel_, "sourceStatus"); identify(hintLabel_, "modeHint");
     identify(status_, "statusMessage"); identify(history_, "historyTable");
     identify(showButton_, "showAnnotatedButton"); identify(saveButton_, "saveAnnotatedButton");
@@ -211,6 +257,12 @@ RulerWindow::RulerWindow(QWidget* parent)
     identify(clearButton_, "clearHistoryButton"); identify(helpButton_, "helpButton");
     identify(shortcutsButton_, "shortcutsButton");
     identify(hideButton_, "hideToTrayButton"); identify(quitButton_, "quitButton");
+
+    connect(label_, &QLineEdit::editingFinished, this, [this] { setLabel(label_->text()); });
+    connect(historyButton_, &QPushButton::clicked, this, [this] {
+        historyPanel_->setHidden(!historyPanel_->isHidden());
+        if (!historyPanel_->isHidden()) showHistory();
+    });
 
     connect(regionButton_, &QPushButton::clicked, this, [this] { selectScreenshotRegion(); });
     canvas_->setOnScreenshot([this](const QImage& crop) {
@@ -342,9 +394,13 @@ void RulerWindow::setEnglish(bool english) {
     hideButton_->setText(trText("Свернуть в трей", "Hide to tray"));
     quitButton_->setText(trText("Выход", "Quit"));
     resetButton_->setText(trText("Сбросить в пиксели", "Reset to pixels"));
+    calibrationDialog_->setWindowTitle(trText("Калибровка масштаба", "Calibrate scale"));
+    calibrationButtons_->button(QDialogButtonBox::Ok)->setText(trText("Применить", "Apply"));
+    calibrationButtons_->button(QDialogButtonBox::Cancel)->setText(trText("Отмена", "Cancel"));
     modeLabel_->setText(trText("Режим", "Mode"));
-    nameLabel_->setText(trText("Метка", "Label"));
+    nameLabel_->setText(trText("Название результата", "Result name"));
     knownLabel_->setText(trText("Известная длина", "Known length"));
+    unitLabel_->setText(trText("Единица измерения", "Unit"));
     toleranceLabel_->setText(trText("Допуск RGB", "RGB tolerance"));
     zoomLabel_->setText(trText("Увеличение лупы", "Magnifier zoom"));
     if (trayShow_) trayShow_->setText(trText("Показать линейку", "Show ruler"));
@@ -383,8 +439,8 @@ QString RulerWindow::modeHint(ruler::Mode mode) const {
         return trText("Нажмите каждый объект, затем «Готово» или Enter. Backspace убирает последнюю метку.",
                       "Click each object, then Done or Enter. Backspace removes the last mark.");
     case ruler::Mode::Calibrate:
-        return trText("Укажите известную длину и единицу; отметьте две точки и нажмите «Готово» или Enter.",
-                      "Enter a known length and unit; mark two points and finish with Done or Enter.");
+        return trText("Отметьте известный отрезок или путь; после «Готово» введите его длину и единицу.",
+                      "Trace a known line or path; after Done, enter its length and unit.");
     case ruler::Mode::Magnifier:
         return trText("Двигайте указатель для увеличения пикселей. Esc возвращает к настройкам.",
                       "Move the pointer to inspect pixels. Esc returns to the controls.");
@@ -394,16 +450,12 @@ QString RulerWindow::modeHint(ruler::Mode mode) const {
 
 void RulerWindow::updateModeControls() {
     const auto mode = static_cast<ruler::Mode>(modeBox_->currentData().toInt());
-    const bool calibrate = mode == ruler::Mode::Calibrate;
     const bool magnifier = mode == ruler::Mode::Magnifier;
-    knownWidget_->setVisible(calibrate);
     toleranceWidget_->setVisible(mode == ruler::Mode::AutoArea);
     zoomWidget_->setVisible(magnifier && optionsExpanded_);
     optionsButton_->setVisible(magnifier);
     optionsButton_->setText(optionsExpanded_ ? trText("Скрыть настройки", "Hide options") :
                                              trText("Настройки лупы", "Magnifier options"));
-    nameLabel_->setVisible(!calibrate && !magnifier);
-    label_->setVisible(!calibrate && !magnifier);
 }
 
 void RulerWindow::updateHints() {
@@ -417,8 +469,12 @@ void RulerWindow::updateAvailability() {
     const bool hasSelection = selected >= 0 && selected < entries_.size();
     captureButton_->setText(hasImage ? trText("Новый снимок", "New capture") :
                                        trText("Захват экрана", "Capture screen"));
-    measureButton_->setText(hasImage ? trText("Измерить по снимку", "Measure this image") :
-                                      trText("Снять и измерить", "Capture and measure"));
+    measureButton_->setText(hasRows && hasImage ? trText("Следующее измерение", "Next measurement") :
+                             hasImage ? trText("Измерить по снимку", "Measure this image") :
+                                        trText("Снять и измерить", "Capture and measure"));
+    historyButton_->setText(trText("История", "History")+QStringLiteral(" (%1)").arg(entries_.size()));
+    historyButton_->setEnabled(hasRows);
+    resultWidget_->setVisible(hasRows);
     captureButton_->setEnabled(screenBox_->count() > 0);
     measureButton_->setEnabled(hasImage || screenBox_->count() > 0);
     saveSourceButton_->setEnabled(hasImage);
@@ -444,7 +500,7 @@ void RulerWindow::updateAvailability() {
     const QString noScreen = trText("Нет доступного экрана", "No screen available");
     captureButton_->setToolTip(captureButton_->isEnabled() ? QString() : noScreen);
     measureButton_->setToolTip(measureButton_->isEnabled() ? modeHint(static_cast<ruler::Mode>(modeBox_->currentData().toInt())) : noScreen);
-    for (auto* button : {captureButton_, openButton_, measureButton_, optionsButton_, resetButton_,
+    for (auto* button : {captureButton_, openButton_, measureButton_, historyButton_, optionsButton_, resetButton_,
                          showButton_, saveButton_, saveSourceButton_, regionButton_, copyButton_, copyAllButton_,
                          csvButton_, clearButton_, helpButton_, shortcutsButton_, hideButton_, quitButton_})
         button->setAccessibleName(button->text());
@@ -460,6 +516,8 @@ void RulerWindow::updateAvailability() {
     resultLabel_->setAccessibleName(resultLabel_->text());
     sourceLabel_->setAccessibleName(sourceLabel_->text());
     hintLabel_->setAccessibleName(hintLabel_->text());
+    calibrationPixels_->setAccessibleName(calibrationPixels_->text());
+    calibrationError_->setAccessibleName(calibrationError_->text());
 }
 
 void RulerWindow::showControls() {
@@ -469,22 +527,22 @@ void RulerWindow::showControls() {
     updateAvailability();
 }
 
-bool RulerWindow::prepareCanvas() {
+void RulerWindow::showHistory() {
+    historyPanel_->show();
+    if (!entries_.isEmpty()) history_->selectRow(entries_.size()-1);
+    history_->setFocus();
+    if (auto* scroll = qobject_cast<QScrollArea*>(centralWidget()))
+        scroll->ensureWidgetVisible(history_);
+}
+
+void RulerWindow::prepareCanvas() {
     activeMode_ = static_cast<ruler::Mode>(modeBox_->currentData().toInt());
-    if (activeMode_ == ruler::Mode::Calibrate && unit_->text().trimmed().isEmpty()) {
-        showControls();
-        QMessageBox::warning(this, QStringLiteral("Desktop Ruler"),
-            trText("Укажите единицу измерения перед калибровкой", "Enter a unit before calibration"));
-        unit_->setFocus();
-        return false;
-    }
     canvas_->setMode(activeMode_);
     canvas_->setLanguage(english_);
     canvas_->setHudText(modeName(activeMode_, english_));
     canvas_->setScale(scale_, scaleUnit_);
     canvas_->setTolerance(tolerance_->value());
     canvas_->setMagnifierZoom(zoom_->value());
-    return true;
 }
 void RulerWindow::populateScreens() {
     const QString current = screenBox_->currentData().toString();
@@ -543,7 +601,7 @@ void RulerWindow::capture() {
         sourceName_ = QStringLiteral("%1 · %2×%3").arg(output)
             .arg(capture.width()).arg(capture.height());
         canvas_->setImage(image_);
-        if (!prepareCanvas()) return;
+        prepareCanvas();
         canvas_->createWinId();
         if (canvas_->windowHandle()) canvas_->windowHandle()->setScreen(screen);
         canvas_->setGeometry(screen->geometry());
@@ -557,7 +615,7 @@ void RulerWindow::openImage(const QImage& image) {
     image_ = image;
     sourceName_ = QStringLiteral("%1 × %2").arg(image.width()).arg(image.height());
     canvas_->setImage(image_);
-    if (!prepareCanvas()) return;
+    prepareCanvas();
     hide(); canvas_->showFullScreen(); canvas_->raise(); canvas_->activateWindow(); canvas_->setFocus();
     status_->setText(trText("Изображение готово", "Image ready"));
     updateAvailability();
@@ -581,13 +639,20 @@ void RulerWindow::selectMode(ruler::Mode mode) {
     modeBox_->setCurrentIndex(static_cast<int>(mode));
     updateModeControls(); updateHints();
 }
-void RulerWindow::setLabel(const QString& label) { label_->setText(label); }
+void RulerWindow::setLabel(const QString& label) {
+    if (entries_.isEmpty()) return;
+    QString name = label.trimmed();
+    if (name.isEmpty()) name = QString::number(entries_.size());
+    entries_.last().name = name;
+    label_->setText(name);
+    if (auto* item = history_->item(entries_.size()-1, 0)) item->setText(name);
+}
 void RulerWindow::nextMeasurement() {
     if (image_.isNull()) {
         status_->setText(trText("Сначала сделайте снимок или откройте файл", "Capture or open an image first"));
         return;
     }
-    if (!prepareCanvas()) return;
+    prepareCanvas();
     hide(); canvas_->showFullScreen(); canvas_->raise(); canvas_->activateWindow(); canvas_->setFocus();
 }
 void RulerWindow::setKnownLength(double length, const QString& unit) {
@@ -596,30 +661,38 @@ void RulerWindow::setKnownLength(double length, const QString& unit) {
 void RulerWindow::onComplete(ruler::Measurement measurement, QVector<QPointF> points, QImage mask) {
     const auto mode = activeMode_;
     if (mode == ruler::Mode::Calibrate) {
-        const double next = ruler::unitsPerPixel(knownLength_->value(), measurement.length);
-        if (next <= 0 || unit_->text().trimmed().isEmpty()) {
-            QMessageBox::warning(canvas_, QStringLiteral("Desktop Ruler"),
-                trText("Укажите положительную длину и единицу", "Enter a positive length and unit"));
+        showControls();
+        calibrationPixels_->setText(trText("Отмеченная длина: ", "Traced length: ")+
+            QString::number(measurement.length, 'f', 2)+QStringLiteral(" px"));
+        calibrationPixels_->setAccessibleName(calibrationPixels_->text());
+        calibrationError_->clear();
+        calibrationError_->hide();
+        if (calibrationDialog_->exec() != QDialog::Accepted) {
+            status_->setText(trText("Калибровка отменена", "Calibration cancelled"));
             return;
         }
+        const double next = ruler::unitsPerPixel(knownLength_->value(), measurement.length);
+        if (next <= 0) return;
         scale_ = next; scaleUnit_ = unit_->text().trimmed();
         scaleLabel_->setText(QStringLiteral("1 px = %1 %2").arg(scale_, 0, 'g', 9).arg(scaleUnit_));
         canvas_->setScale(scale_, scaleUnit_);
-        showControls();
+        updateAvailability();
         status_->setText(trText("Масштаб установлен", "Scale calibrated"));
         return;
     }
     Entry entry;
-    entry.name = label_->text().trimmed();
-    if (entry.name.isEmpty()) entry.name = QString::number(entries_.size()+1);
+    entry.name = QString::number(entries_.size()+1);
     entry.kind = mode;
     entry.raw = measurement; entry.scale = scale_; entry.unit = scaleUnit_;
     entry.screenshot = canvas_->annotatedImage(points, mode, mask);
     entries_.append(entry);
     refreshHistory();
     history_->selectRow(entries_.size()-1);
+    label_->setText(entry.name);
+    historyPanel_->hide();
     status_->setText(resultText(entry));
     showControls();
+    measureButton_->setFocus();
 }
 QString RulerWindow::resultText(const Entry& entry) const {
     const auto& m = entry.raw;
@@ -770,6 +843,8 @@ bool RulerWindow::saveSelectedImage(const QString& path) {
 }
 void RulerWindow::clearHistory() {
     entries_.clear(); refreshHistory();
+    label_->clear();
+    historyPanel_->hide();
     status_->setText(trText("История очищена", "History cleared"));
 }
 QString RulerWindow::displayError(const QString& error) const {
@@ -806,8 +881,9 @@ void RulerWindow::showHelp() {
         "the RGB tolerance is the maximum channel difference from its seed. The region uses 4-connected pixels; "
         "area counts occupied pixels and perimeter counts exposed pixel edges, including holes. "
         "Use Done, Enter or right click to finish; Cancel or Esc returns; Undo, Backspace or Ctrl+Z removes a point or stroke. "
-        "Calibration measures a known line or path and sets units per image pixel. Area scales by its square. "
-        "Measure again reuses the frozen image; New capture updates it. History lasts until Clear or quit. "
+        "For calibration, trace a known line or path, then enter its length and unit in the dialog. Area scales by the square. "
+        "Name the completed result, then choose Next measurement to reuse the frozen image; New capture updates it. "
+        "Open History to inspect, copy or export results; it lasts until Clear or quit. "
         "Full image PNG saves the whole source; Marked crop PNG saves the annotated result. Copy rows as TSV or export CSV. "
         "Magnifier works without measurement. Shortcuts edits local key bindings. Closing hides to tray when available; Quit exits.") :
         QStringLiteral("Выберите экран и сделайте снимок либо откройте файл. Изображение неподвижно. Выберите режим и нажмите «Измерить». "
@@ -816,8 +892,9 @@ void RulerWindow::showHelp() {
         "Область по цвету: нажмите на начальный пиксель. Допуск RGB — максимальное отклонение канала от него. "
         "Связность по 4 сторонам; площадь — число пикселей, периметр — открытые стороны пикселей, включая отверстия. "
         "«Готово», Enter или правая кнопка завершают; «Назад» или Esc возвращают; «Отменить», Backspace или Ctrl+Z убирают точку/штрих. "
-        "Калибровка задаёт единицы на пиксель по известному отрезку или пути; площадь меняется по квадрату масштаба. "
-        "Повторное измерение использует тот же снимок; «Новый снимок» обновляет его. История хранится до очистки или выхода. "
+        "Для калибровки отметьте известный отрезок или путь, затем введите его длину и единицу в диалоге; площадь меняется по квадрату масштаба. "
+        "Назовите готовый результат, затем нажмите «Следующее измерение» для того же снимка; «Новый снимок» обновляет его. "
+        "Откройте «Историю» для просмотра, копирования и экспорта; она хранится до очистки или выхода. "
         "«Снимок PNG» сохраняет весь источник; «Разметка PNG» — фрагмент с отметками. Таблица копируется как TSV или сохраняется CSV. "
         "Лупа работает отдельно. «Сочетания» настраивает клавиши внутри приложения. "
         "Закрытие скрывает окно в трей, если он доступен; «Выход» завершает программу."));

@@ -17,6 +17,8 @@ class QSystemTrayIcon;
 class QAction;
 class QCloseEvent;
 class QWidget;
+class QDialog;
+class QDialogButtonBox;
 
 class RulerWindow final : public QMainWindow {
 public:
@@ -62,7 +64,8 @@ private:
     void updateModeControls();
     void updateAvailability();
     void updateHints();
-    bool prepareCanvas();
+    void showHistory();
+    void prepareCanvas();
     void showControls();
     QString modeHint(ruler::Mode mode) const;
     void setEnglish(bool english);
@@ -75,10 +78,13 @@ private:
     QSpinBox *tolerance_, *zoom_;
     QLineEdit *unit_, *label_;
     QLabel *status_, *scaleLabel_, *sourceLabel_, *resultLabel_, *hintLabel_;
-    QLabel *modeLabel_, *nameLabel_, *knownLabel_, *toleranceLabel_, *zoomLabel_;
-    QWidget *knownWidget_, *toleranceWidget_, *zoomWidget_;
+    QLabel *modeLabel_, *nameLabel_, *knownLabel_, *unitLabel_, *toleranceLabel_, *zoomLabel_;
+    QLabel *calibrationPixels_, *calibrationError_;
+    QWidget *resultWidget_, *historyPanel_, *toleranceWidget_, *zoomWidget_;
+    QDialog* calibrationDialog_;
+    QDialogButtonBox* calibrationButtons_;
     QTableWidget* history_;
-    QPushButton *captureButton_, *openButton_, *measureButton_, *optionsButton_, *resetButton_,
+    QPushButton *captureButton_, *openButton_, *measureButton_, *historyButton_, *optionsButton_, *resetButton_,
         *showButton_, *saveButton_, *saveSourceButton_, *regionButton_, *copyButton_, *copyAllButton_,
         *csvButton_, *clearButton_, *helpButton_, *shortcutsButton_, *hideButton_, *quitButton_;
     QSystemTrayIcon* tray_ = nullptr;

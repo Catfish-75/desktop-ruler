@@ -5,6 +5,7 @@
 #include <QApplication>
 #include <QComboBox>
 #include <QDialogButtonBox>
+#include <QDialog>
 #include <QDoubleSpinBox>
 #include <QFile>
 #include <QFileDialog>
@@ -12,6 +13,7 @@
 #include <QLineEdit>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QSettings>
 #include <QSpinBox>
 #include <QTableWidget>
 #include <QTemporaryDir>
@@ -116,15 +118,29 @@ bool openBrokenThroughDialog(QPushButton* button, const QString& path) {
     return sawFile && sawError;
 }
 
-bool clickAndDismissWarning(QPushButton* button) {
-    bool sawWarning = false;
+bool finishCalibration(QToolButton* done, double length, const QString& unit,
+                       bool expectInvalidUnit = false) {
+    bool sawDialog = false;
+    bool rejectedBlankUnit = false;
     QTimer responder;
     responder.setInterval(10);
     QObject::connect(&responder, &QTimer::timeout, [&] {
-        auto* warning = qobject_cast<QMessageBox*>(QApplication::activeModalWidget());
-        if (!warning) return;
-        sawWarning = true;
-        warning->accept();
+        auto* dialog = qobject_cast<QDialog*>(QApplication::activeModalWidget());
+        if (!dialog || dialog->objectName() != QStringLiteral("calibrationDialog") || sawDialog) return;
+        sawDialog = true;
+        auto* known = named<QDoubleSpinBox>(*dialog, "knownLength");
+        auto* knownUnit = named<QLineEdit>(*dialog, "knownUnit");
+        auto* buttons = dialog->findChild<QDialogButtonBox*>();
+        if (!buttons) return;
+        known->setValue(length);
+        knownUnit->setText(unit);
+        buttons->button(QDialogButtonBox::Ok)->click();
+        if (expectInvalidUnit) {
+            auto* error = named<QLabel>(*dialog, "calibrationError");
+            rejectedBlankUnit = dialog->isVisible() && error->isVisible() &&
+                !error->text().isEmpty();
+            buttons->button(QDialogButtonBox::Cancel)->click();
+        }
     });
     QTimer bailout;
     bailout.setSingleShot(true);
@@ -133,17 +149,15 @@ bool clickAndDismissWarning(QPushButton* button) {
     });
     bailout.start(4000);
     responder.start();
-    QTest::mouseClick(button, Qt::LeftButton);
+    QTest::mouseClick(done, Qt::LeftButton);
     responder.stop();
     bailout.stop();
-    return sawWarning;
+    return sawDialog && (!expectInvalidUnit || rejectedBlankUnit);
 }
 
 void checkActionsInside(QWidget& window) {
-    for (const char* name : {"measureButton", "showAnnotatedButton", "saveAnnotatedButton",
-                             "saveSourceButton", "screenshotRegionButton", "copySelectedButton",
-                             "copyAllButton", "exportCsvButton", "clearHistoryButton",
-                             "helpButton", "shortcutsButton", "quitButton"}) {
+    for (const char* name : {"measureButton", "historyButton", "saveSourceButton",
+                             "screenshotRegionButton", "helpButton", "shortcutsButton", "quitButton"}) {
         auto* button = named<QPushButton>(window, name);
         const QRect inWindow(button->mapTo(&window, QPoint(0, 0)), button->size());
         require(button->isVisible() && inWindow.left() >= 0 && inWindow.top() >= 0 &&
@@ -172,6 +186,9 @@ int main(int argc, char** argv) {
     QApplication app(argc, argv);
     app.setQuitOnLastWindowClosed(false);
     try {
+        QTemporaryDir settingsDir;
+        require(settingsDir.isValid(), "temporary shortcut settings unavailable");
+        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, settingsDir.path());
         QTemporaryDir files;
         require(files.isValid(), "temporary directory unavailable");
         QImage fixture(400, 300, QImage::Format_ARGB32);
@@ -191,12 +208,15 @@ int main(int argc, char** argv) {
         auto* capture = named<QPushButton>(window, "captureButton");
         auto* source = named<QLabel>(window, "sourceStatus");
         auto* result = named<QLabel>(window, "latestResult");
+        auto* resultPanel = named<QWidget>(window, "resultPanel");
         auto* label = named<QLineEdit>(window, "measurementLabel");
         auto* known = named<QDoubleSpinBox>(window, "knownLength");
         auto* tolerance = named<QSpinBox>(window, "colorTolerance");
         auto* options = named<QPushButton>(window, "modeOptionsButton");
         auto* zoom = named<QSpinBox>(window, "magnifierZoom");
         auto* history = named<QTableWidget>(window, "historyTable");
+        auto* historyButton = named<QPushButton>(window, "historyButton");
+        auto* historyPanel = named<QWidget>(window, "historyPanel");
         auto* fullPng = named<QPushButton>(window, "saveSourceButton");
         auto* markedPng = named<QPushButton>(window, "saveAnnotatedButton");
         auto* csv = named<QPushButton>(window, "exportCsvButton");
@@ -206,14 +226,16 @@ int main(int argc, char** argv) {
         // Empty-session affordances and actual narrow-window visibility.
         require(source->text().contains(QStringLiteral("не выбран")), "empty source is not explicit");
         require(measure->isEnabled() && capture->isEnabled(), "capture entry points unavailable");
+        require(!resultPanel->isVisible() && !historyPanel->isVisible() && !historyButton->isEnabled(),
+                "empty result or history is presented as complete");
         require(!fullPng->isEnabled() && !markedPng->isEnabled() && !selectedCopy->isEnabled() &&
                 !csv->isEnabled() && !clear->isEnabled(), "history actions enabled without data");
         checkActionsInside(window);
 
         // Selecting the visible mode control reveals only the relevant inputs.
         mode->setCurrentIndex(static_cast<int>(ruler::Mode::Calibrate));
-        require(known->isVisible() && !tolerance->isVisible() && !label->isVisible(),
-                "calibration does not expose its input exclusively");
+        require(!known->isVisible() && !tolerance->isVisible() && !label->isVisible(),
+                "calibration asks for a value before a line is traced");
         checkActionsInside(window);
         mode->setCurrentIndex(static_cast<int>(ruler::Mode::AutoArea));
         require(tolerance->isVisible() && !known->isVisible(), "auto area tolerance not contextual");
@@ -223,12 +245,10 @@ int main(int argc, char** argv) {
         QTest::mouseClick(options, Qt::LeftButton);
         require(zoom->isVisible(), "magnifier zoom cannot be opened");
         mode->setCurrentIndex(static_cast<int>(ruler::Mode::Path));
-        require(label->isVisible() && !options->isVisible() && !zoom->isVisible(),
-                "ordinary mode retains irrelevant settings");
+        require(!label->isVisible() && !options->isVisible() && !zoom->isVisible(),
+                "ordinary mode asks for a result name before completion");
 
         // The primary action must capture when no image exists, then expose a usable canvas.
-        QTest::mouseClick(label, Qt::LeftButton);
-        QTest::keyClicks(label, "bolt");
         QTest::mouseClick(measure, Qt::LeftButton);
         Canvas* canvas = window.canvas();
         require(waitUntil([&] { return canvas->isVisible(); }), "primary Measure did not capture");
@@ -242,12 +262,35 @@ int main(int argc, char** argv) {
         QTest::mouseClick(named<QToolButton>(*canvas, "canvasDoneButton"), Qt::LeftButton);
         require(waitUntil([&] { return window.isVisible() && !canvas->isVisible(); }),
                 "Done did not return to controls");
-        require(window.historyCount() == 1 && history->item(0, 0)->text() == QStringLiteral("bolt"),
-                "completed path is missing from history");
+        require(window.historyCount() == 1 && resultPanel->isVisible() && !historyPanel->isVisible() &&
+                measure->text() == QStringLiteral("Следующее измерение") && label->isVisible(),
+                "completion did not present the result-to-next flow");
         require(result->text().contains(QStringLiteral("200")), "latest result lacks measured distance");
+        require(waitUntil([&] { return window.isActiveWindow() && measure->hasFocus(); }, 2000),
+                "controls were not active before the History shortcut");
+        QTest::keyClick(measure, Qt::Key_H, Qt::ControlModifier | Qt::AltModifier);
+        require(waitUntil([&] { return historyPanel->isVisible() && history->hasFocus(); }),
+                "History shortcut did not expand and focus the table");
+        QTest::mouseClick(historyButton, Qt::LeftButton);
+        QTest::mouseClick(label, Qt::LeftButton);
+        QTest::keyClick(label, Qt::Key_A, Qt::ControlModifier);
+        QTest::keyClicks(label, "bolt");
+        QTest::mouseClick(historyButton, Qt::LeftButton);
+        require(historyPanel->isVisible() && history->item(0, 0)->text() == QStringLiteral("bolt"),
+                "post-result name is missing from on-demand history");
         require(markedPng->isEnabled() && selectedCopy->isEnabled() && csv->isEnabled(),
                 "result actions unavailable after completion");
+        QTest::mouseClick(historyButton, Qt::LeftButton);
         checkActionsInside(window);
+        QTest::mouseClick(measure, Qt::LeftButton);
+        require(waitUntil([&] { return canvas->isVisible(); }),
+                "Next measurement did not reuse the current image");
+        QTest::keyClick(canvas, Qt::Key_Escape);
+        require(waitUntil([&] { return window.isVisible() && !canvas->isVisible(); }) &&
+                label->text() == QStringLiteral("bolt") &&
+                history->item(0, 0)->text() == QStringLiteral("bolt"),
+                "cancelling Next measurement renamed the previous result");
+        QTest::mouseClick(historyButton, Qt::LeftButton);
 
         // User-facing save dialogs preserve the distinction between full image and marked crop.
         const QString fullPath = files.filePath(QStringLiteral("full.png"));
@@ -278,36 +321,54 @@ int main(int argc, char** argv) {
         require(window.historyCount() == 1 && source->text() == sourceBeforeError && !canvas->isVisible(),
                 "broken image damaged the current session");
 
-        // A missing calibration unit must be caught before the canvas hides the input.
+        // Calibration asks for the known value after drawing and keeps old scale on Cancel.
         mode->setCurrentIndex(static_cast<int>(ruler::Mode::Calibrate));
-        auto* unit = named<QLineEdit>(window, "knownUnit");
-        QTest::mouseClick(unit, Qt::LeftButton);
-        QTest::keyClick(unit, Qt::Key_A, Qt::ControlModifier);
-        QTest::keyClick(unit, Qt::Key_Backspace);
-        require(unit->text().isEmpty(), "calibration unit could not be cleared");
-        known->setValue(100);
-        require(clickAndDismissWarning(measure), "missing calibration unit did not warn");
-        require(window.isVisible() && !canvas->isVisible() && window.historyCount() == 1 &&
-                source->text() == sourceBeforeError,
-                "invalid calibration left the controls or damaged the existing session");
-        QTest::keyClicks(unit, "mm");
         QTest::mouseClick(measure, Qt::LeftButton);
         require(waitUntil([&] { return canvas->isVisible(); }),
-                "valid calibration could not reach the canvas");
+                "calibration did not let the user draw first");
         QTest::mouseClick(canvas, Qt::LeftButton, Qt::NoModifier,
                           widgetPoint(canvas, {100, 150}, imageSize));
         QTest::mouseClick(canvas, Qt::LeftButton, Qt::NoModifier,
                           widgetPoint(canvas, {300, 150}, imageSize));
-        QTest::mouseClick(named<QToolButton>(*canvas, "canvasDoneButton"), Qt::LeftButton);
+        require(finishCalibration(named<QToolButton>(*canvas, "canvasDoneButton"), 100, {}, true),
+                "blank unit was accepted or calibration dialog could not be cancelled");
+        require(waitUntil([&] { return window.isVisible() && !canvas->isVisible(); }) &&
+                window.historyCount() == 1 && source->text() == sourceBeforeError &&
+                !named<QPushButton>(window, "resetScaleButton")->isEnabled(),
+                "cancelled calibration changed the scale or existing result");
+        QTest::mouseClick(measure, Qt::LeftButton);
+        require(waitUntil([&] { return canvas->isVisible(); }),
+                "calibration could not be repeated after Cancel");
+        QTest::mouseClick(canvas, Qt::LeftButton, Qt::NoModifier,
+                          widgetPoint(canvas, {100, 150}, imageSize));
+        QTest::mouseClick(canvas, Qt::LeftButton, Qt::NoModifier,
+                          widgetPoint(canvas, {300, 150}, imageSize));
+        require(finishCalibration(named<QToolButton>(*canvas, "canvasDoneButton"), 100,
+                                  QStringLiteral("mm")), "valid calibration dialog did not apply");
         require(waitUntil([&] { return window.isVisible() && !canvas->isVisible(); }) &&
                 window.historyCount() == 1 &&
                 named<QPushButton>(window, "resetScaleButton")->isEnabled() &&
                 named<QLabel>(window, "statusMessage")->text() == QStringLiteral("Масштаб установлен"),
                 "valid calibration did not apply the measured scale");
 
+        mode->setCurrentIndex(static_cast<int>(ruler::Mode::Path));
+        QTest::mouseClick(measure, Qt::LeftButton);
+        require(waitUntil([&] { return canvas->isVisible(); }),
+                "measurement after calibration did not start");
+        QTest::mouseClick(canvas, Qt::LeftButton, Qt::NoModifier,
+                          widgetPoint(canvas, {100, 150}, imageSize));
+        QTest::mouseClick(canvas, Qt::LeftButton, Qt::NoModifier,
+                          widgetPoint(canvas, {300, 150}, imageSize));
+        QTest::mouseClick(named<QToolButton>(*canvas, "canvasDoneButton"), Qt::LeftButton);
+        require(waitUntil([&] { return window.isVisible() && !canvas->isVisible(); }) &&
+                window.historyCount() == 2 && label->text() == QStringLiteral("2") &&
+                history->item(0, 0)->text() == QStringLiteral("bolt") &&
+                result->text().contains(QStringLiteral("100.00 mm")),
+                "new result reused the previous name or ignored calibration");
+
         // Language switching updates the visible action and source/result descriptions.
         language->setCurrentIndex(1);
-        require(measure->text().contains(QStringLiteral("Measure")) &&
+        require(measure->text() == QStringLiteral("Next measurement") &&
                 source->text().startsWith(QStringLiteral("Source:")) &&
                 result->text().startsWith(QStringLiteral("Latest result:")) &&
                 !label->accessibleName().isEmpty(), "English UI state is incomplete");
