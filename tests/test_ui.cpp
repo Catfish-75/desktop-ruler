@@ -12,6 +12,7 @@
 #include <QTableWidget>
 #include <QTimer>
 #include <cstdio>
+#include <optional>
 #define CHECK(condition) do { if (!(condition)) { std::fprintf(stderr, "test_ui failed at line %d: %s\n", __LINE__, #condition); return 1; } } while (false)
 #include <cmath>
 
@@ -25,7 +26,7 @@ static void click(Canvas* canvas, QPointF imagePoint, QSize imageSize) {
     QTest::mouseClick(canvas, Qt::LeftButton, Qt::NoModifier, widgetPoint(canvas,imagePoint,imageSize));
 }
 
-static bool finishCalibration(Canvas* canvas) {
+static bool finishCalibration(Canvas* canvas, std::optional<QPoint> rightClick = std::nullopt) {
     bool sawDialog = false;
     QTimer responder;
     responder.setInterval(10);
@@ -43,7 +44,8 @@ static bool finishCalibration(Canvas* canvas) {
     });
     bailout.start(4000);
     responder.start();
-    QTest::keyClick(canvas, Qt::Key_Return);
+    if (rightClick) QTest::mouseClick(canvas, Qt::RightButton, Qt::NoModifier, *rightClick);
+    else QTest::keyClick(canvas, Qt::Key_Return);
     responder.stop();
     bailout.stop();
     return sawDialog;
@@ -157,6 +159,8 @@ int main(int argc, char** argv) {
     window.selectMode(ruler::Mode::Angle);
     window.nextMeasurement();
     click(c,{50,50},blank.size()); click(c,{80,50},blank.size()); click(c,{50,80},blank.size());
+    CHECK(window.historyCount() == 3);
+    QTest::mouseClick(c, Qt::RightButton, Qt::NoModifier, widgetPoint(c,{50,80},blank.size()));
     CHECK(window.historyCount() == 4);
 
     window.selectMode(ruler::Mode::Count);
@@ -197,6 +201,15 @@ int main(int argc, char** argv) {
     const QColor centerPixel = magnified.pixelColor(298, 198);
     CHECK(centerPixel.red() > 200 && centerPixel.green() < 40);
     magnifier.hide();
+
+    // One left point, a visible preview segment, and right click must reach
+    // the calibration length/unit dialog through the real window callback.
+    window.selectMode(ruler::Mode::Calibrate);
+    window.nextMeasurement();
+    click(c, {20, 20}, blank.size());
+    QTest::mouseMove(c, widgetPoint(c, {120, 20}, blank.size()));
+    CHECK(finishCalibration(c, widgetPoint(c, {120, 20}, blank.size())));
+    CHECK(window.historyCount() == 6);
 
     window.clearHistory();
     CHECK(window.historyCount() == 0);

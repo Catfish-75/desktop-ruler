@@ -66,15 +66,76 @@ int main(int argc, char** argv) {
     QString lastError;
     int completed = 0;
     double length = 0;
+    double angleResult = 0;
     int countResult = 0;
     int cancelled = 0;
     QVector<QPointF> completedPoints;
     canvas.setOnError([&](QString message) { ++errors; lastError = std::move(message); });
     canvas.setOnComplete([&](ruler::Measurement value, QVector<QPointF> points, QImage) {
-        ++completed; length = value.length; countResult = value.count;
+        ++completed; length = value.length; angleResult = value.angle; countResult = value.count;
         completedPoints = std::move(points);
     });
     canvas.setOnCancel([&] { ++cancelled; });
+
+    // The last visible preview segment becomes the endpoint when right-click
+    // finishes calibration. Re-clicking an existing endpoint must not add it
+    // twice, and a zero-length attempt must remain invalid.
+    canvas.setMode(ruler::Mode::Calibrate);
+    const int completeBeforeRightClick = completed;
+    const int errorsBeforeRightClick = errors;
+    QTest::mouseClick(&canvas, Qt::LeftButton, Qt::NoModifier, QPoint(20, 100));
+    QTest::mouseMove(&canvas, QPoint(320, 100));
+    QTest::mouseClick(&canvas, Qt::RightButton, Qt::NoModifier, QPoint(320, 100));
+    CHECK(completed == completeBeforeRightClick + 1 && errors == errorsBeforeRightClick);
+    CHECK(std::abs(length - 300) < 1e-9 && completedPoints.size() == 2);
+
+    canvas.setMode(ruler::Mode::Calibrate);
+    QTest::mouseClick(&canvas, Qt::LeftButton, Qt::NoModifier, QPoint(20, 100));
+    QTest::mouseClick(&canvas, Qt::LeftButton, Qt::NoModifier, QPoint(320, 100));
+    QTest::mouseClick(&canvas, Qt::RightButton, Qt::NoModifier, QPoint(320, 100));
+    CHECK(completed == completeBeforeRightClick + 2 && errors == errorsBeforeRightClick);
+    CHECK(std::abs(length - 300) < 1e-9 && completedPoints.size() == 2);
+
+    canvas.setMode(ruler::Mode::Calibrate);
+    QTest::mouseClick(&canvas, Qt::LeftButton, Qt::NoModifier, QPoint(20, 100));
+    QTest::mouseClick(&canvas, Qt::RightButton, Qt::NoModifier, QPoint(20, 100));
+    CHECK(completed == completeBeforeRightClick + 2 && errors == errorsBeforeRightClick + 1);
+
+    canvas.setMode(ruler::Mode::Calibrate);
+    QTest::mouseClick(&canvas, Qt::LeftButton, Qt::NoModifier, QPoint(20, 40));
+    QTest::mouseClick(&canvas, Qt::RightButton, Qt::NoModifier, controls->geometry().center());
+    CHECK(completed == completeBeforeRightClick + 2 && errors == errorsBeforeRightClick + 2);
+
+    canvas.setMode(ruler::Mode::Area);
+    const int errorsBeforeArea = errors;
+    QTest::mouseClick(&canvas, Qt::LeftButton, Qt::NoModifier, QPoint(20, 20));
+    QTest::mouseClick(&canvas, Qt::LeftButton, Qt::NoModifier, QPoint(120, 120));
+    QTest::mouseClick(&canvas, Qt::LeftButton, Qt::NoModifier, QPoint(20, 120));
+    QTest::mouseClick(&canvas, Qt::RightButton, Qt::NoModifier, QPoint(120, 20));
+    CHECK(completed == completeBeforeRightClick + 2 && errors == errorsBeforeArea + 1);
+    canvas.undo();
+    QTest::mouseClick(done, Qt::LeftButton);
+    CHECK(completed == completeBeforeRightClick + 3 && completedPoints.size() == 3);
+
+    canvas.setMode(ruler::Mode::Angle);
+    QTest::mouseClick(&canvas, Qt::LeftButton, Qt::NoModifier, QPoint(100, 100));
+    QTest::mouseClick(&canvas, Qt::LeftButton, Qt::NoModifier, QPoint(200, 100));
+    QTest::mouseClick(&canvas, Qt::LeftButton, Qt::NoModifier, QPoint(100, 200));
+    CHECK(completed == completeBeforeRightClick + 3);
+    QTest::mouseClick(&canvas, Qt::LeftButton, Qt::NoModifier, QPoint(200, 200));
+    QTest::mouseClick(&canvas, Qt::RightButton, Qt::NoModifier, QPoint(200, 200));
+    CHECK(completed == completeBeforeRightClick + 4 && completedPoints.size() == 3);
+    CHECK(std::abs(angleResult - 90) < 1e-9);
+
+    canvas.setMode(ruler::Mode::Angle);
+    QTest::mouseClick(&canvas, Qt::LeftButton, Qt::NoModifier, QPoint(100, 100));
+    QTest::mouseClick(&canvas, Qt::LeftButton, Qt::NoModifier, QPoint(200, 100));
+    QTest::mouseClick(&canvas, Qt::RightButton, Qt::NoModifier, QPoint(100, 200));
+    CHECK(completed == completeBeforeRightClick + 5 && completedPoints.size() == 3);
+    CHECK(std::abs(angleResult - 90) < 1e-9);
+    canvas.setMode(ruler::Mode::Path);
+    completed = 0;
+    errors = 0;
 
     // Switching modes during a held path stroke must not carry its drawing
     // state into count mode or add a phantom mark on the next mouse move.

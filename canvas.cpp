@@ -134,24 +134,24 @@ QString Canvas::usageText() const {
     }
     if (english_) {
         switch (mode_) {
-        case ruler::Mode::Path: return QStringLiteral("Click points or drag a curved path; Done finishes.");
-        case ruler::Mode::Area: return QStringLiteral("Click boundary corners or drag; Done closes the outline.");
-        case ruler::Mode::Perimeter: return QStringLiteral("Click boundary corners or drag; Done closes the outline.");
-        case ruler::Mode::AutoArea: return QStringLiteral("Click inside a color region, then Done to save its area.");
-        case ruler::Mode::Angle: return QStringLiteral("Click the vertex, then one point on each ray.");
-        case ruler::Mode::Count: return QStringLiteral("Click each object to place a numbered mark; Done finishes.");
-        case ruler::Mode::Calibrate: return QStringLiteral("Trace a known line or path; Done applies its length.");
+        case ruler::Mode::Path: return QStringLiteral("Click points or drag; right-click marks the endpoint and finishes.");
+        case ruler::Mode::Area: return QStringLiteral("Left-click boundary corners; right-click the last corner to close and finish.");
+        case ruler::Mode::Perimeter: return QStringLiteral("Left-click boundary corners; right-click the last corner to close and finish.");
+        case ruler::Mode::AutoArea: return QStringLiteral("Left-click a color region, then right-click to finish.");
+        case ruler::Mode::Angle: return QStringLiteral("Left-click the vertex and first ray; right-click the second ray to finish.");
+        case ruler::Mode::Count: return QStringLiteral("Left-click each object to count it; right-click to finish.");
+        case ruler::Mode::Calibrate: return QStringLiteral("Click a start point, then right-click the endpoint to enter its length.");
         case ruler::Mode::Magnifier: return QStringLiteral("Move to inspect pixels; Done or Cancel returns to controls.");
         }
     }
     switch (mode_) {
-    case ruler::Mode::Path: return QStringLiteral("Ставьте точки или ведите линию мышью; «Готово» завершает путь.");
-    case ruler::Mode::Area: return QStringLiteral("Отмечайте углы контура или ведите мышью; «Готово» замыкает его.");
-    case ruler::Mode::Perimeter: return QStringLiteral("Отмечайте углы контура или ведите мышью; «Готово» замыкает его.");
-    case ruler::Mode::AutoArea: return QStringLiteral("Щёлкните внутри одноцветной области, затем нажмите «Готово».");
-    case ruler::Mode::Angle: return QStringLiteral("Отметьте вершину, затем по одной точке на каждом луче.");
-    case ruler::Mode::Count: return QStringLiteral("Щёлкайте по объектам для нумерации; «Готово» завершает подсчёт.");
-    case ruler::Mode::Calibrate: return QStringLiteral("Отметьте известный отрезок или путь; «Готово» задаёт масштаб.");
+    case ruler::Mode::Path: return QStringLiteral("Ставьте точки или ведите линию мышью; правая кнопка отмечает конец и завершает путь.");
+    case ruler::Mode::Area: return QStringLiteral("Левой кнопкой ставьте поворотные точки контура; правой — последнюю точку и завершение.");
+    case ruler::Mode::Perimeter: return QStringLiteral("Левой кнопкой ставьте поворотные точки контура; правой — последнюю точку и завершение.");
+    case ruler::Mode::AutoArea: return QStringLiteral("Левой кнопкой выберите цветную область, правой завершите измерение.");
+    case ruler::Mode::Angle: return QStringLiteral("Левой кнопкой отметьте вершину и первый луч; правой — второй луч и завершение.");
+    case ruler::Mode::Count: return QStringLiteral("Левой кнопкой отмечайте объекты, правой завершите подсчёт.");
+    case ruler::Mode::Calibrate: return QStringLiteral("Отметьте начало, затем правой кнопкой — конец; введите длину отрезка.");
     case ruler::Mode::Magnifier: return QStringLiteral("Перемещайте указатель для увеличения; «Готово» вернёт к настройкам.");
     }
     return {};
@@ -180,11 +180,32 @@ QPointF Canvas::pointAt(QPointF widgetPoint) const {
 }
 
 void Canvas::mousePressEvent(QMouseEvent* event) {
-    if (event->button() == Qt::RightButton) { finish(); return; }
+    if (event->button() == Qt::RightButton) {
+        if (!screenshotSelection_ && !points_.isEmpty() &&
+            imageRect().contains(event->position()) &&
+            !(controls_->isVisible() && controls_->geometry().contains(event->position().toPoint()))) {
+            const QPointF endpoint = pointAt(event->position());
+            if (mode_ == ruler::Mode::Angle && points_.size() == 2 &&
+                std::hypot(endpoint.x()-points_.first().x(), endpoint.y()-points_.first().y()) > 0.1) {
+                points_.append(endpoint);
+            } else if (mode_ == ruler::Mode::Path || mode_ == ruler::Mode::Calibrate ||
+                       mode_ == ruler::Mode::Area || mode_ == ruler::Mode::Perimeter) {
+                const bool closesOutline = (mode_ == ruler::Mode::Area || mode_ == ruler::Mode::Perimeter) &&
+                    std::hypot(endpoint.x()-points_.first().x(), endpoint.y()-points_.first().y()) <= 0.1;
+                if (!closesOutline &&
+                    std::hypot(endpoint.x()-points_.last().x(), endpoint.y()-points_.last().y()) > 0.1) {
+                    if (!drawing_) strokeStarts_.append(points_.size());
+                    points_.append(endpoint);
+                }
+            }
+        }
+        finish(); return;
+    }
     if (event->button() != Qt::LeftButton || image_.isNull() ||
         !imageRect().contains(event->position())) return;
     setFocus();
     const QPointF p = pointAt(event->position());
+    if (!screenshotSelection_ && mode_ == ruler::Mode::Angle && points_.size() >= 3) return;
     cursor_ = p; hasCursor_ = true;
     if (screenshotSelection_) {
         if (screenshotHasRect_) resetScreenshotSelection();
@@ -224,12 +245,10 @@ void Canvas::mousePressEvent(QMouseEvent* event) {
         updateControls(); preview(); update();
         return;
     }
-    if (mode_ == ruler::Mode::Angle && points_.size() >= 3) points_.clear();
     points_.append(p);
     drawing_ = mode_ == ruler::Mode::Path || mode_ == ruler::Mode::Calibrate ||
                mode_ == ruler::Mode::Area || mode_ == ruler::Mode::Perimeter;
     if (drawing_) strokeStarts_.append(points_.size()-1);
-    if (mode_ == ruler::Mode::Angle && points_.size() == 3) { finish(); return; }
     updateControls(); preview(); update();
 }
 

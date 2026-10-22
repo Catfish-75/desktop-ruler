@@ -9,10 +9,10 @@
 int main(int argc, char** argv) {
     for (int i=1; i<argc; ++i) {
         if (std::strcmp(argv[i], "--version") == 0 || std::strcmp(argv[i], "-v") == 0) {
-            std::puts("desktop-ruler 0.2.1"); return 0;
+            std::puts("desktop-ruler 0.2.2"); return 0;
         }
         if (std::strcmp(argv[i], "--help") == 0 || std::strcmp(argv[i], "-h") == 0) {
-            std::puts("desktop-ruler 0.2.1\nUsage: desktop-ruler [--image FILE] [--tray] [--help] [--version]\n"
+            std::puts("desktop-ruler 0.2.2\nUsage: desktop-ruler [--image FILE] [--tray] [--help] [--version]\n"
                       "Measure a frozen Wayland screen capture or local image. Qt6 Widgets and grim required for capture.");
             return 0;
         }
@@ -22,7 +22,7 @@ int main(int argc, char** argv) {
     QApplication app(argc, argv);
     app.setApplicationName(QStringLiteral("desktop-ruler"));
     app.setDesktopFileName(QStringLiteral("desktop-ruler"));
-    app.setApplicationVersion(QStringLiteral("0.2.1"));
+    app.setApplicationVersion(QStringLiteral("0.2.2"));
     QCommandLineParser parser;
     parser.setApplicationDescription(QStringLiteral("Desktop Ruler: measure a frozen screen capture or local image"));
     parser.addHelpOption(); parser.addVersionOption();

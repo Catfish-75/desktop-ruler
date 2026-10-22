@@ -289,6 +289,7 @@ RulerWindow::RulerWindow(QWidget* parent)
 
     calibrationDialog_ = new QDialog(this);
     auto* calibrationLayout = new QVBoxLayout(calibrationDialog_);
+    calibrationLayout->setSizeConstraint(QLayout::SetFixedSize);
     calibrationPixels_ = new QLabel;
     calibrationLayout->addWidget(calibrationPixels_);
     auto* calibrationForm = new QFormLayout;
@@ -545,24 +546,24 @@ void RulerWindow::setEnglish(bool english) {
 QString RulerWindow::modeHint(ruler::Mode mode) const {
     switch (mode) {
     case ruler::Mode::Path:
-        return trText("Нажмите две точки, затем «Готово» или Enter. Перетаскивайте для кривой; Backspace отменяет штрих.",
-                      "Click two points, then Done or Enter. Drag for a curve; Backspace undoes a stroke.");
+        return trText("Отметьте начало и нажмите правой кнопкой на конце или поставьте две точки и нажмите «Готово». Backspace отменяет штрих.",
+                      "Mark a start, then right-click the endpoint, or click two points and press Done. Backspace undoes a stroke.");
     case ruler::Mode::Area:
     case ruler::Mode::Perimeter:
-        return trText("Обведите контур минимум тремя точками, затем «Готово» или Enter. Backspace отменяет штрих.",
-                      "Trace at least three points, then Done or Enter. Backspace undoes a stroke.");
+        return trText("Левой кнопкой поставьте минимум три поворотные точки, правой замкните контур и завершите. Backspace отменяет штрих.",
+                      "Left-click at least three boundary corners; right-click to close and finish. Backspace undoes a stroke.");
     case ruler::Mode::AutoArea:
-        return trText("Нажмите пиксель области, проверьте подсветку и нажмите «Готово» или Enter.",
-                      "Click a region pixel, check the highlight, then Done or Enter to finish.");
+        return trText("Левой кнопкой выберите пиксель области, проверьте подсветку и завершите правой.",
+                      "Left-click a region pixel, check the highlight, then right-click to finish.");
     case ruler::Mode::Angle:
-        return trText("Вершина, затем две точки лучей. Третья точка завершит измерение.",
-                      "Click the vertex, then two ray points. The third point completes the angle.");
+        return trText("Левой кнопкой отметьте вершину и первый луч; правой — точку второго луча и завершение. Можно поставить все три точки левой и завершить правой.",
+                      "Left-click the vertex and first ray; right-click the second ray to finish. Or left-click all three points, then right-click to finish.");
     case ruler::Mode::Count:
-        return trText("Нажмите каждый объект, затем «Готово» или Enter. Backspace убирает последнюю метку.",
-                      "Click each object, then Done or Enter. Backspace removes the last mark.");
+        return trText("Левой кнопкой отмечайте объекты, правой завершите подсчёт. Backspace убирает последнюю метку.",
+                      "Left-click each object, then right-click to finish. Backspace removes the last mark.");
     case ruler::Mode::Calibrate:
-        return trText("Отметьте известный отрезок или путь; после «Готово» введите его длину и единицу.",
-                      "Trace a known line or path; after Done, enter its length and unit.");
+        return trText("Левой кнопкой — начало, правой — конец. Затем введите длину и единицу. Для пути добавьте промежуточные точки левой кнопкой.",
+                      "Left-click the start, right-click the endpoint, then enter length and unit. Add intermediate points with left click.");
     case ruler::Mode::Magnifier:
         return trText("Двигайте указатель для увеличения пикселей. Esc возвращает к настройкам.",
                       "Move the pointer to inspect pixels. Esc returns to the controls.");
@@ -876,13 +877,19 @@ void RulerWindow::setKnownLength(double length, const QString& unit) {
 void RulerWindow::onComplete(ruler::Measurement measurement, QVector<QPointF> points, QImage mask) {
     const auto mode = activeMode_;
     if (mode == ruler::Mode::Calibrate) {
-        showControls();
+        // Restore controls after the dialog: remapping the parent here can
+        // leave its transient dialog invisible on Wayland.
+        canvas_->hide();
         calibrationPixels_->setText(trText("Отмеченная длина: ", "Traced length: ")+
             QString::number(measurement.length, 'f', 2)+QStringLiteral(" px"));
         calibrationPixels_->setAccessibleName(calibrationPixels_->text());
         calibrationError_->clear();
         calibrationError_->hide();
-        if (calibrationDialog_->exec() != QDialog::Accepted) {
+        knownLength_->setFocus();
+        knownLength_->selectAll();
+        const int result = calibrationDialog_->exec();
+        showControls();
+        if (result != QDialog::Accepted) {
             status_->setText(trText("Калибровка отменена", "Calibration cancelled"));
             return;
         }
@@ -1096,10 +1103,10 @@ void RulerWindow::showHelp() {
         "switch workspace with the pinned picker, then Take here; Cancel keeps the previous source. "
         "Other Wayland sessions offer a 5-second switch window. The screen is frozen. Choose a mode, then Measure. "
         "With no image, Measure opens the capture picker first. Click at least two points for a distance; "
-        "drag to trace freehand. Angle: vertex first, then two rays. Auto color: click a seed; "
+        "drag to trace freehand. Angle: left-click vertex and first ray, then right-click the second ray. Auto color: click a seed; "
         "the RGB tolerance is the maximum channel difference from its seed. The region uses 4-connected pixels; "
         "area counts occupied pixels and perimeter counts exposed pixel edges, including holes. "
-        "Use Done, Enter or right click to finish; Cancel or Esc returns; Undo, Backspace or Ctrl+Z removes a point or stroke. "
+        "Right-click to finish; for paths and outlines it also marks the final point. Done or Enter also finish. Cancel or Esc returns; Undo, Backspace or Ctrl+Z removes a point or stroke. "
         "For calibration, trace a known line or path, then enter its length and unit in the dialog. Area scales by the square. "
         "Name the completed result, then choose Next measurement to reuse the frozen image; New capture updates it. "
         "Open History to inspect, copy or export results; it lasts until Clear or quit. "
@@ -1109,10 +1116,10 @@ void RulerWindow::showHelp() {
         "переключите рабочий стол с закреплённым окном выбора и нажмите «Снять здесь»; «Отмена» сохранит прежний источник. "
         "В других Wayland-сессиях даётся 5 секунд на переход. Изображение неподвижно. Выберите режим и нажмите «Измерить». "
         "Если снимка нет, «Измерить» сначала откроет окно выбора. Для расстояния нажмите минимум две точки; "
-        "перетаскивайте для свободной линии. Угол: сначала вершина, затем два луча. "
+        "перетаскивайте для свободной линии. Угол: левой кнопкой вершина и первый луч, правой — второй луч. "
         "Область по цвету: нажмите на начальный пиксель. Допуск RGB — максимальное отклонение канала от него. "
         "Связность по 4 сторонам; площадь — число пикселей, периметр — открытые стороны пикселей, включая отверстия. "
-        "«Готово», Enter или правая кнопка завершают; «Назад» или Esc возвращают; «Отменить», Backspace или Ctrl+Z убирают точку/штрих. "
+        "Правая кнопка завершает измерение, для пути и контура также отмечает конечную точку. «Готово» и Enter тоже завершают. «Назад» или Esc возвращают; «Отменить», Backspace или Ctrl+Z убирают точку/штрих. "
         "Для калибровки отметьте известный отрезок или путь, затем введите его длину и единицу в диалоге; площадь меняется по квадрату масштаба. "
         "Назовите готовый результат, затем нажмите «Следующее измерение» для того же снимка; «Новый снимок» обновляет его. "
         "Откройте «Историю» для просмотра, копирования и экспорта; она хранится до очистки или выхода. "
