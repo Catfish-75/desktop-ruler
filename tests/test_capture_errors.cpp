@@ -33,6 +33,19 @@ bool waitUntil(const std::function<bool()>& condition, int timeoutMs = 5000) {
     return condition();
 }
 
+QPushButton* pickerTakeButton() {
+    for (auto* top : QApplication::topLevelWidgets())
+        if (auto* button = top->findChild<QPushButton*>(QStringLiteral("captureTakeHereButton")))
+            if (button->isVisible()) return button;
+    return nullptr;
+}
+QPushButton* pickerCancelButton() {
+    for (auto* top : QApplication::topLevelWidgets())
+        if (auto* button = top->findChild<QPushButton*>(QStringLiteral("captureCancelButton")))
+            if (button->isVisible()) return button;
+    return nullptr;
+}
+
 bool captureAndDismissWarning(QPushButton* capture, QString* warningText) {
     bool sawWarning = false;
     QTimer responder;
@@ -52,6 +65,8 @@ bool captureAndDismissWarning(QPushButton* capture, QString* warningText) {
     bailout.start(6000);
     responder.start();
     QTest::mouseClick(capture, Qt::LeftButton);
+    require(waitUntil([] { return pickerTakeButton() != nullptr; }), "capture picker missing before error");
+    QTest::mouseClick(pickerTakeButton(), Qt::LeftButton);
     const bool returned = waitUntil([&] {
         return sawWarning && QApplication::activeModalWidget() == nullptr;
     }, 6500);
@@ -120,6 +135,24 @@ int main(int argc, char** argv) {
         auto* status = named<QLabel>(window, "statusMessage");
         const QString initialSource = source->text();
 
+        // Cancel leaves the session untouched, and its delayed fallback timer
+        // cannot accidentally confirm a later picker.
+        qputenv("RULER_TEST_GRIM_MODE", "valid");
+        QTest::mouseClick(capture, Qt::LeftButton);
+        require(waitUntil([] { return pickerCancelButton() != nullptr; }), "cancel action missing");
+        QTest::mouseClick(pickerCancelButton(), Qt::LeftButton);
+        require(waitUntil([&] { return window.isVisible(); }) &&
+                source->text() == initialSource && invocationCount(calls) == 0,
+                "cancel captured or changed the source");
+        QTest::qWait(3000);
+        QTest::mouseClick(capture, Qt::LeftButton);
+        require(waitUntil([] { return pickerTakeButton() != nullptr; }), "second picker missing");
+        QTest::qWait(2200);
+        require(pickerTakeButton() && invocationCount(calls) == 0,
+                "old fallback timer confirmed the newer picker");
+        QTest::mouseClick(pickerCancelButton(), Qt::LeftButton);
+        require(waitUntil([&] { return window.isVisible(); }), "second Cancel did not restore controls");
+
         qputenv("RULER_TEST_GRIM_MODE", "failure");
         QString warning;
         require(captureAndDismissWarning(capture, &warning), "nonzero grim exit did not show a warning");
@@ -139,9 +172,10 @@ int main(int argc, char** argv) {
         qputenv("RULER_TEST_GRIM_MODE", "valid");
         const int beforeRepeatedClick = invocationCount(calls);
         QTest::mouseClick(capture, Qt::LeftButton);
-        // Capture hides the controls while its delayed process launch is pending.
-        // The same public button action must still be ignored during that interval.
+        require(waitUntil([] { return pickerTakeButton() != nullptr; }), "capture picker missing before recovery");
+        // A repeated action while the picker is open must not create another capture.
         capture->click();
+        QTest::mouseClick(pickerTakeButton(), Qt::LeftButton);
         require(waitUntil([&] { return window.canvas()->isVisible(); }),
                 "valid capture did not recover after errors");
         require(source->text().contains(QStringLiteral("64×48")) && window.historyCount() == 0,

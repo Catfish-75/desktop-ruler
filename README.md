@@ -1,4 +1,4 @@
-# Desktop Ruler 0.2.0
+# Desktop Ruler 0.2.1
 
 Desktop Ruler measures distances, paths, areas, perimeters, angles, and counts on a frozen screen capture or a local image. It is an independent implementation inspired by workflows described in the [Universal Desktop Ruler documentation](https://avpsoft.com/products/udruler/); it does not include AVPSoft source code or artwork.
 
@@ -18,7 +18,7 @@ Run `./desktop-ruler --version` to check the binary version. To add a user-local
 
 ## Use
 
-Choose an output and **Capture screen**, or **Open image**. Select a mode and press **Measure**. If no image is loaded, Measure captures the selected output first. The image stays frozen: **Next measurement** reuses it, while **New capture** updates it. The window shows the current source, mode guidance, and latest result. Only settings relevant to the selected mode appear; magnifier zoom is under **Magnifier options**.
+Choose **Active screen** (default) or a specific output and press **Capture screen**, or **Open image**. Select a mode and press **Measure**. If no image is loaded, Measure starts capture first. On supported Hyprland versions, the controls hide and a small pinned picker follows you across workspaces: switch to the target workspace, then press **Take here**. The picker disappears before the screenshot. **Cancel** restores the controls without changing the current image or results. On other Wayland compositors, or if Hyprland cannot pin the picker, it offers a clearly marked 5-second switch window and an immediate **Take here** action. The image stays frozen: **Next measurement** reuses it, while **New capture** updates it. The controls window is compact and floating when Hyprland's runtime window commands are available. Only settings relevant to the selected mode appear; magnifier zoom is under **Magnifier options**.
 
 On the image, left-click points or drag to trace a curve. For a distance, mark at least two points; for a closed area or perimeter, mark at least three. **Done**, Enter, or right-click finishes. **Undo**, Backspace, or Ctrl+Z removes the last point or stroke; **Cancel** or Escape returns to the controls. Tab hides/shows the canvas buttons so pixels beneath them remain reachable. Angle mode takes the vertex and two ray points. Count mode numbers clicks. Automatic color area starts from a clicked pixel; RGB tolerance controls how far each channel may differ from that seed.
 
@@ -36,7 +36,7 @@ This application's source is licensed under the MIT License; see [LICENSE](LICEN
 
 ---
 
-# Экранная линейка 0.2.0
+# Экранная линейка 0.2.1
 
 Desktop Ruler измеряет расстояния, пути, площади, периметры, углы и количество объектов на неподвижном снимке экрана или в локальном изображении. Это независимая реализация процессов, описанных в [документации Universal Desktop Ruler](https://avpsoft.com/products/udruler/); исходный код и графические материалы AVPSoft не используются.
 
@@ -55,7 +55,7 @@ make test
 
 ## Работа
 
-Выберите выход и нажмите **«Захват экрана»** либо **«Открыть файл»**. Выберите режим и нажмите **«Измерить»**. Если изображения ещё нет, эта кнопка сначала захватит выбранный выход. Снимок остаётся неподвижным: **«Следующее измерение»** использует его снова, а **«Новый снимок»** обновляет. В окне видны источник, подсказка для режима и последний результат. Показываются только нужные для режима настройки; увеличение лупы находится в **«Настройках лупы»**.
+Выберите **«Текущий экран»** (по умолчанию) или конкретный выход и нажмите **«Захват экрана»** либо **«Открыть файл»**. Выберите режим и нажмите **«Измерить»**. Если изображения ещё нет, эта кнопка сначала откроет выбор захвата. В поддерживаемой версии Hyprland основное окно скроется, а небольшое закреплённое окно будет доступно на других рабочих столах: перейдите к нужному и нажмите **«Снять здесь»**. Перед снимком окно выбора исчезнет. **«Отмена»** возвращает управление без изменения снимка и результатов. В других Wayland-композиторах либо при ошибке закрепления окно явно показывает отсчёт 5 секунд для перехода и кнопку немедленного снимка. Снимок остаётся неподвижным: **«Следующее измерение»** использует его снова, а **«Новый снимок»** обновляет. Основное окно компактное и плавающее при доступности команд управления окнами Hyprland. Показываются только нужные для режима настройки; увеличение лупы находится в **«Настройках лупы»**.
 
 На изображении ставьте точки левой кнопкой или ведите мышью для кривой. Для расстояния нужны минимум две точки, для замкнутой площади или периметра — минимум три. **«Готово»**, Enter или правая кнопка завершают измерение. **«Отменить»**, Backspace или Ctrl+Z убирают последнюю точку либо штрих; **«Назад»** или Escape возвращают к настройкам. Tab скрывает/показывает кнопки на холсте, чтобы можно было отметить пиксели под ними. Для угла отметьте вершину и две точки лучей. Режим подсчёта нумерует щелчки. Автоматическая область начинается с выбранного пикселя; допуск RGB задаёт допустимое отклонение каждого канала от его цвета.
 

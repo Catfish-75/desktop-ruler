@@ -4,6 +4,7 @@
 
 #include <QMainWindow>
 #include <QImage>
+#include <QPointer>
 #include <QVector>
 
 class QComboBox;
@@ -16,6 +17,8 @@ class QTableWidget;
 class QSystemTrayIcon;
 class QAction;
 class QCloseEvent;
+class QShowEvent;
+class QScreen;
 class QWidget;
 class QDialog;
 class QDialogButtonBox;
@@ -40,6 +43,7 @@ public:
 
 protected:
     void closeEvent(QCloseEvent* event) override;
+    void showEvent(QShowEvent* event) override;
 
 private:
     struct Entry {
@@ -50,6 +54,12 @@ private:
         QImage screenshot;
     };
     void capture();
+    QSize controlWindowSize() const;
+    void configureMainWindow(int attempt = 0);
+    void configureCapturePicker(QPointer<QDialog> picker, int attempt = 0);
+    void confirmCapture();
+    void cancelCapture();
+    void captureScreen(QPointer<QScreen> screen);
     void populateScreens();
     void onComplete(ruler::Measurement measurement, QVector<QPointF> points, QImage mask);
     QString resultText(const Entry& entry) const;
@@ -98,6 +108,10 @@ private:
     bool optionsExpanded_ = false;
     bool quitRequested_ = false;
     bool capturePending_ = false;
+    QDialog* capturePicker_ = nullptr;
+    QPushButton* captureTakeButton_ = nullptr;
+    QLabel* capturePickerLabel_ = nullptr;
+    bool captureFallback_ = false;
     bool english_ = false;
     ruler::ShortcutController shortcuts_;
 };

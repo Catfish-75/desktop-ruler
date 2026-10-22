@@ -61,6 +61,15 @@ int main(int argc, char** argv) {
                 button->text() == QStringLiteral("Capture screen")) capture = button;
         require(capture, "capture button missing");
         QTest::mouseClick(capture, Qt::LeftButton);
+        QPushButton* take = nullptr;
+        for (int i = 0; i < 30 && !take; ++i) {
+            for (auto* top : QApplication::topLevelWidgets())
+                if (auto* button = top->findChild<QPushButton*>(QStringLiteral("captureTakeHereButton")))
+                    if (button->isVisible() && button->isEnabled()) take = button;
+            if (!take) QTest::qWait(100);
+        }
+        require(take, "capture picker was not ready");
+        QTest::mouseClick(take, Qt::LeftButton);
         Canvas* canvas = window.canvas();
         for (int i = 0; i < 100 && !canvas->isVisible(); ++i) QTest::qWait(100);
         require(canvas->isVisible(), "real capture did not open canvas");

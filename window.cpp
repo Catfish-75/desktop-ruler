@@ -4,11 +4,15 @@
 #include <QClipboard>
 #include <QCloseEvent>
 #include <QComboBox>
+#include <QCursor>
 #include <QDoubleSpinBox>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFrame>
 #include <QGuiApplication>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QGridLayout>
 #include <QHBoxLayout>
 #include <QHeaderView>
@@ -22,6 +26,7 @@
 #include <QPushButton>
 #include <QSaveFile>
 #include <QScreen>
+#include <QShowEvent>
 #include <QScrollArea>
 #include <QSpinBox>
 #include <QSystemTrayIcon>
@@ -37,6 +42,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <optional>
 
 namespace {
 QString modeName(ruler::Mode mode, bool en) {
@@ -63,6 +69,83 @@ QString csvCell(const QString& value) {
     escaped.replace('"', QStringLiteral("\"\""));
     return QStringLiteral("\"")+escaped+QStringLiteral("\"");
 }
+bool onHyprland() {
+    return QGuiApplication::platformName() == QStringLiteral("wayland") &&
+           !qEnvironmentVariableIsEmpty("HYPRLAND_INSTANCE_SIGNATURE");
+}
+QByteArray hyprctl(const QStringList& args) {
+    QProcess process;
+    process.start(QStringLiteral("hyprctl"), args);
+    if (!process.waitForStarted(700) || !process.waitForFinished(700)) {
+        process.kill(); process.waitForFinished(700);
+        return {};
+    }
+    return process.exitStatus() == QProcess::NormalExit && process.exitCode() == 0
+        ? process.readAllStandardOutput() : QByteArray();
+}
+std::optional<QJsonObject> ownHyprWindow(const QString& title) {
+    const auto document = QJsonDocument::fromJson(hyprctl({QStringLiteral("-j"), QStringLiteral("clients")}));
+    if (!document.isArray()) return std::nullopt;
+    for (const auto& value : document.array()) {
+        const auto object = value.toObject();
+        if (object.value(QStringLiteral("pid")).toInteger() == QCoreApplication::applicationPid() &&
+            object.value(QStringLiteral("title")).toString() == title &&
+            object.value(QStringLiteral("mapped")).toBool()) return object;
+    }
+    return std::nullopt;
+}
+bool setOwnHyprWindow(const QString& title, bool pin) {
+    const auto window = ownHyprWindow(title);
+    if (!window) return false;
+    const QString address = window->value(QStringLiteral("address")).toString();
+    if (!address.startsWith(QStringLiteral("0x"))) return false;
+    const QString selector = QStringLiteral("address:") + address;
+    if (!window->value(QStringLiteral("floating")).toBool() &&
+        hyprctl({QStringLiteral("dispatch"),
+                 QStringLiteral("hl.dsp.window.float({ window = \"%1\", action = \"set\" })").arg(selector)}).trimmed() != "ok")
+        return false;
+    if (pin && !window->value(QStringLiteral("pinned")).toBool() &&
+        hyprctl({QStringLiteral("dispatch"),
+                 QStringLiteral("hl.dsp.window.pin({ window = \"%1\", action = \"set\" })").arg(selector)}).trimmed() != "ok")
+        return false;
+    const auto updated = ownHyprWindow(title);
+    return updated && updated->value(QStringLiteral("floating")).toBool() &&
+           (!pin || updated->value(QStringLiteral("pinned")).toBool());
+}
+bool sizeOwnHyprWindow(const QString& title, QSize size) {
+    const auto window = ownHyprWindow(title);
+    if (!window) return false;
+    const QString address = window->value(QStringLiteral("address")).toString();
+    if (!address.startsWith(QStringLiteral("0x"))) return false;
+    const QString selector = QStringLiteral("address:") + address;
+    const QString command = QStringLiteral(
+        "hl.dsp.window.resize({ window = \"%1\", x = %2, y = %3, relative = false })")
+        .arg(selector).arg(size.width()).arg(size.height());
+    if (hyprctl({QStringLiteral("dispatch"), command}).trimmed() != "ok") return false;
+    const auto updated = ownHyprWindow(title);
+    if (!updated) return false;
+    const auto dimensions = updated->value(QStringLiteral("size")).toArray();
+    return dimensions.size() == 2 &&
+           std::abs(dimensions.at(0).toInt() - size.width()) <= 32 &&
+           std::abs(dimensions.at(1).toInt() - size.height()) <= 32;
+}
+QScreen* currentCaptureScreen(QWidget* picker) {
+    if (onHyprland()) {
+        const auto document = QJsonDocument::fromJson(hyprctl({QStringLiteral("-j"), QStringLiteral("monitors")}));
+        if (document.isArray()) {
+            for (const auto& value : document.array()) {
+                const auto monitor = value.toObject();
+                if (!monitor.value(QStringLiteral("focused")).toBool()) continue;
+                const QString name = monitor.value(QStringLiteral("name")).toString();
+                for (QScreen* screen : QGuiApplication::screens())
+                    if (screen->name() == name) return screen;
+            }
+        }
+    }
+    if (QScreen* screen = QGuiApplication::screenAt(QCursor::pos())) return screen;
+    if (picker && picker->screen()) return picker->screen();
+    return QGuiApplication::primaryScreen();
+}
 }
 
 RulerWindow::RulerWindow(QWidget* parent)
@@ -85,7 +168,7 @@ RulerWindow::RulerWindow(QWidget* parent)
     const QIcon icon = QIcon::fromTheme(QStringLiteral("desktop-ruler"),
                                       QIcon::fromTheme(QStringLiteral("accessories-calculator")));
     setWindowIcon(icon);
-    resize(900, 560);
+    resize(620, 350);
     auto* scroll = new QScrollArea(this);
     scroll->setWidgetResizable(true);
     scroll->setFrameShape(QFrame::NoFrame);
@@ -101,9 +184,12 @@ RulerWindow::RulerWindow(QWidget* parent)
     captureButton_ = new QPushButton; openButton_ = new QPushButton;
     languageBox_ = new QComboBox;
     languageBox_->addItems({QStringLiteral("Русский"), QStringLiteral("English")});
-    top->addWidget(screenBox_, 1); top->addWidget(captureButton_);
-    top->addWidget(openButton_); top->addWidget(languageBox_);
+    top->addWidget(screenBox_, 1); top->addWidget(languageBox_);
     root->addLayout(top);
+    auto* sourceButtons = new QHBoxLayout;
+    sourceButtons->addWidget(captureButton_); sourceButtons->addWidget(openButton_);
+    sourceButtons->addStretch(1);
+    root->addLayout(sourceButtons);
     sourceLabel_ = new QLabel;
     root->addWidget(sourceLabel_);
 
@@ -156,11 +242,13 @@ RulerWindow::RulerWindow(QWidget* parent)
     root->addWidget(resultWidget_);
     resultWidget_->hide();
     measureButton_ = new QPushButton;
-    root->addWidget(measureButton_);
     status_ = new QLabel;
     root->addWidget(status_);
     historyButton_ = new QPushButton;
-    root->addWidget(historyButton_);
+    auto* actionRow = new QHBoxLayout;
+    actionRow->addWidget(measureButton_); actionRow->addWidget(historyButton_);
+    actionRow->addStretch(1);
+    root->addLayout(actionRow);
     historyPanel_ = new QWidget;
     auto* historyLayout = new QVBoxLayout(historyPanel_);
     historyLayout->setContentsMargins(0, 0, 0, 0);
@@ -262,6 +350,7 @@ RulerWindow::RulerWindow(QWidget* parent)
     connect(historyButton_, &QPushButton::clicked, this, [this] {
         historyPanel_->setHidden(!historyPanel_->isHidden());
         if (!historyPanel_->isHidden()) showHistory();
+        if (onHyprland()) configureMainWindow();
     });
 
     connect(regionButton_, &QPushButton::clicked, this, [this] { selectScreenshotRegion(); });
@@ -333,6 +422,10 @@ RulerWindow::RulerWindow(QWidget* parent)
         tray_ = new QSystemTrayIcon(icon, this);
         auto* menu = new QMenu(this);
         trayShow_ = menu->addAction(QString(), this, [this] {
+            if (capturePending_) {
+                if (capturePicker_) { capturePicker_->raise(); capturePicker_->activateWindow(); }
+                return;
+            }
             if (canvas_->isVisible()) canvas_->cancel(); else showControls();
         });
         trayCapture_ = menu->addAction(QString(), this, [this] { capture(); });
@@ -343,6 +436,10 @@ RulerWindow::RulerWindow(QWidget* parent)
         tray_->show();
         connect(tray_, &QSystemTrayIcon::activated, this, [this](auto reason) {
             if (reason == QSystemTrayIcon::Trigger) {
+                if (capturePending_) {
+                    if (capturePicker_) { capturePicker_->raise(); capturePicker_->activateWindow(); }
+                    return;
+                }
                 if (canvas_->isVisible()) canvas_->cancel(); else showControls();
             }
         });
@@ -352,7 +449,29 @@ RulerWindow::RulerWindow(QWidget* parent)
     status_->setText(trText("Готово к захвату экрана или открытию файла", "Ready to capture a screen or open an image"));
     scaleLabel_->setText(QStringLiteral("1 px = 1 px"));
 }
-RulerWindow::~RulerWindow() { delete canvas_; }
+RulerWindow::~RulerWindow() { delete capturePicker_; delete canvas_; }
+
+void RulerWindow::showEvent(QShowEvent* event) {
+    QMainWindow::showEvent(event);
+    if (onHyprland()) QTimer::singleShot(80, this, [this] { configureMainWindow(); });
+}
+
+QSize RulerWindow::controlWindowSize() const {
+    const int height = !historyPanel_->isHidden() ? 620 : (entries_.isEmpty() ? 350 : 420);
+    const QSize available = screen() ? screen()->availableGeometry().size() : QSize(800, 640);
+    return QSize(std::min(620, std::max(380, available.width() - 40)),
+                 std::min(height, std::max(300, available.height() - 40)));
+}
+
+void RulerWindow::configureMainWindow(int attempt) {
+    if (!isVisible()) return;
+    const QSize target = controlWindowSize();
+    if (setOwnHyprWindow(windowTitle(), false) && sizeOwnHyprWindow(windowTitle(), target)) {
+        resize(target);
+        return;
+    }
+    if (attempt < 8) QTimer::singleShot(100, this, [this, attempt] { configureMainWindow(attempt + 1); });
+}
 
 void RulerWindow::closeEvent(QCloseEvent* event) {
     if (!quitRequested_ && tray_ && tray_->isVisible() && QSystemTrayIcon::isSystemTrayAvailable()) {
@@ -365,6 +484,8 @@ void RulerWindow::closeEvent(QCloseEvent* event) {
 
 void RulerWindow::quitApplication() {
     quitRequested_ = true;
+    capturePending_ = false;
+    if (capturePicker_) { capturePicker_->hide(); capturePicker_->deleteLater(); capturePicker_ = nullptr; }
     canvas_->hide();
     if (tray_) tray_->hide();
     close();
@@ -376,6 +497,7 @@ QString RulerWindow::trText(const char* ru, const char* en) const {
 }
 void RulerWindow::setEnglish(bool english) {
     english_ = english;
+    populateScreens();
     const int current = modeBox_->currentIndex();
     for (int i=0; i<modeBox_->count(); ++i)
         modeBox_->setItemText(i, modeName(static_cast<ruler::Mode>(i), english));
@@ -475,8 +597,8 @@ void RulerWindow::updateAvailability() {
     historyButton_->setText(trText("История", "History")+QStringLiteral(" (%1)").arg(entries_.size()));
     historyButton_->setEnabled(hasRows);
     resultWidget_->setVisible(hasRows);
-    captureButton_->setEnabled(screenBox_->count() > 0);
-    measureButton_->setEnabled(hasImage || screenBox_->count() > 0);
+    captureButton_->setEnabled(!QGuiApplication::screens().isEmpty());
+    measureButton_->setEnabled(hasImage || !QGuiApplication::screens().isEmpty());
     saveSourceButton_->setEnabled(hasImage);
     regionButton_->setEnabled(hasImage);
     for (auto* button : {showButton_, saveButton_, copyButton_}) button->setEnabled(hasSelection);
@@ -547,30 +669,121 @@ void RulerWindow::prepareCanvas() {
 void RulerWindow::populateScreens() {
     const QString current = screenBox_->currentData().toString();
     screenBox_->clear();
+    screenBox_->addItem(trText("Текущий экран", "Active screen"), QString());
     for (QScreen* screen : QGuiApplication::screens()) {
         screenBox_->addItem(QStringLiteral("%1 · %2×%3 · %4×")
             .arg(screen->name()).arg(screen->size().width()).arg(screen->size().height())
             .arg(screen->devicePixelRatio(), 0, 'g', 4), screen->name());
     }
     const int selected = screenBox_->findData(current);
-    if (selected >= 0) screenBox_->setCurrentIndex(selected);
+    screenBox_->setCurrentIndex(std::max(0, selected));
 }
 void RulerWindow::capture() {
     if (capturePending_ || QApplication::activeModalWidget()) return;
     populateScreens();
     updateAvailability();
-    const auto screens = QGuiApplication::screens();
-    if (screenBox_->currentIndex() < 0 || screenBox_->currentIndex() >= screens.size()) {
+    if (QGuiApplication::screens().isEmpty()) {
         status_->setText(trText("Нет доступного экрана для захвата", "No screen is available to capture"));
         showControls();
         return;
     }
-    QPointer<QScreen> screen = screens[screenBox_->currentIndex()];
-    const QString output = screen->name();
-    const QString scale = QString::number(screen->devicePixelRatio(), 'g', 8);
     capturePending_ = true;
     hide(); canvas_->hide();
-    QTimer::singleShot(220, this, [this, screen, output, scale] {
+    capturePicker_ = new QDialog(nullptr, Qt::Window | Qt::WindowCloseButtonHint | Qt::WindowStaysOnTopHint);
+    capturePicker_->setWindowTitle(QStringLiteral("Desktop Ruler · capture picker"));
+    capturePicker_->setFixedSize(410, 170);
+    auto* layout = new QVBoxLayout(capturePicker_);
+    capturePickerLabel_ = new QLabel(capturePicker_);
+    capturePickerLabel_->setWordWrap(true);
+    layout->addWidget(capturePickerLabel_);
+    auto* buttons = new QHBoxLayout;
+    captureTakeButton_ = new QPushButton(trText("Снять здесь", "Take here"), capturePicker_);
+    captureTakeButton_->setObjectName(QStringLiteral("captureTakeHereButton"));
+    auto* cancel = new QPushButton(trText("Отмена", "Cancel"), capturePicker_);
+    cancel->setObjectName(QStringLiteral("captureCancelButton"));
+    buttons->addWidget(captureTakeButton_); buttons->addWidget(cancel);
+    layout->addLayout(buttons);
+    connect(captureTakeButton_, &QPushButton::clicked, this, [this] { confirmCapture(); });
+    connect(cancel, &QPushButton::clicked, this, [this] { cancelCapture(); });
+    connect(capturePicker_, &QDialog::rejected, this, [this] { cancelCapture(); });
+    captureTakeButton_->setEnabled(!onHyprland());
+    capturePickerLabel_->setText(onHyprland() ?
+        trText("Подготавливаем выбор рабочего стола…", "Preparing workspace picker…") :
+        trText("Переключитесь на нужный рабочий стол. Снимок через 5 секунд; «Снять здесь» — сразу.",
+               "Switch to the target workspace. Capture in 5 seconds; Take here captures now."));
+    capturePicker_->show();
+    capturePicker_->raise();
+    capturePicker_->activateWindow();
+    captureFallback_ = !onHyprland();
+    QPointer<QDialog> session = capturePicker_;
+    if (captureFallback_) QTimer::singleShot(5000, this, [this, session] {
+        if (capturePending_ && capturePicker_ == session && captureFallback_) confirmCapture();
+    });
+    else QTimer::singleShot(80, this, [this, session] { configureCapturePicker(session); });
+}
+
+void RulerWindow::configureCapturePicker(QPointer<QDialog> picker, int attempt) {
+    if (!capturePending_ || !picker || capturePicker_ != picker) return;
+    if (setOwnHyprWindow(capturePicker_->windowTitle(), true) &&
+        sizeOwnHyprWindow(capturePicker_->windowTitle(), QSize(410, 170))) {
+        captureTakeButton_->setEnabled(true);
+        capturePickerLabel_->setText(trText(
+            "Переключитесь на нужный рабочий стол. Затем нажмите «Снять здесь»; окно исчезнет перед снимком.",
+            "Switch to the target workspace, then press Take here. This picker disappears before capture."));
+        return;
+    }
+    if (attempt < 8) {
+        QTimer::singleShot(120, this, [this, picker, attempt] { configureCapturePicker(picker, attempt + 1); });
+        return;
+    }
+    captureFallback_ = true;
+    captureTakeButton_->setEnabled(true);
+    capturePickerLabel_->setText(trText(
+        "Закрепить окно в Hyprland не удалось. Переключитесь на нужный рабочий стол: снимок через 5 секунд.",
+        "Could not pin the picker in Hyprland. Switch workspace now; capture starts in 5 seconds."));
+    QTimer::singleShot(5000, this, [this, picker] {
+        if (capturePending_ && capturePicker_ == picker && captureFallback_) confirmCapture();
+    });
+}
+
+void RulerWindow::cancelCapture() {
+    if (!capturePending_) return;
+    capturePending_ = false;
+    captureFallback_ = false;
+    if (capturePicker_) {
+        QDialog* picker = capturePicker_;
+        capturePicker_ = nullptr;
+        picker->hide(); picker->deleteLater();
+    }
+    captureTakeButton_ = nullptr;
+    capturePickerLabel_ = nullptr;
+    showControls();
+    status_->setText(trText("Захват отменён", "Capture cancelled"));
+}
+
+void RulerWindow::confirmCapture() {
+    if (!capturePending_ || !capturePicker_) return;
+    QPointer<QScreen> screen = currentCaptureScreen(capturePicker_);
+    const QString selectedOutput = screenBox_->currentData().toString();
+    if (!selectedOutput.isEmpty()) {
+        screen = nullptr;
+        for (QScreen* candidate : QGuiApplication::screens())
+            if (candidate->name() == selectedOutput) { screen = candidate; break; }
+    }
+    QDialog* picker = capturePicker_;
+    capturePicker_ = nullptr;
+    captureTakeButton_ = nullptr;
+    capturePickerLabel_ = nullptr;
+    captureFallback_ = false;
+    picker->hide(); picker->deleteLater();
+    QTimer::singleShot(350, this, [this, screen] { captureScreen(screen); });
+}
+
+void RulerWindow::captureScreen(QPointer<QScreen> screen) {
+    if (!capturePending_) return;
+    const QString output = screen ? screen->name() : QString();
+    const QString scale = screen ? QString::number(screen->devicePixelRatio(), 'g', 8) : QString();
+    {
         capturePending_ = false;
         if (!screen) {
             showControls(); status_->setText(trText("Экран отключён", "Screen disconnected")); return;
@@ -608,7 +821,7 @@ void RulerWindow::capture() {
         canvas_->showFullScreen(); canvas_->raise(); canvas_->activateWindow(); canvas_->setFocus();
         status_->setText(trText("Снимок готов", "Capture ready"));
         updateAvailability();
-    });
+    }
 }
 void RulerWindow::openImage(const QImage& image) {
     if (image.isNull()) return;
@@ -845,6 +1058,8 @@ void RulerWindow::clearHistory() {
     entries_.clear(); refreshHistory();
     label_->clear();
     historyPanel_->hide();
+    updateAvailability();
+    if (onHyprland()) configureMainWindow();
     status_->setText(trText("История очищена", "History cleared"));
 }
 QString RulerWindow::displayError(const QString& error) const {
@@ -875,8 +1090,10 @@ QString RulerWindow::displayError(const QString& error) const {
 }
 void RulerWindow::showHelp() {
     QMessageBox::information(this, trText("Справка", "Help"), english_ ?
-        QStringLiteral("Select a screen and Capture, or Open image. The screen is frozen. Choose a mode, then Measure. "
-        "With no image, Measure captures the selected screen first. Click at least two points for a distance; "
+        QStringLiteral("Choose Active screen or an output and Capture, or Open image. On supported Hyprland, "
+        "switch workspace with the pinned picker, then Take here; Cancel keeps the previous source. "
+        "Other Wayland sessions offer a 5-second switch window. The screen is frozen. Choose a mode, then Measure. "
+        "With no image, Measure opens the capture picker first. Click at least two points for a distance; "
         "drag to trace freehand. Angle: vertex first, then two rays. Auto color: click a seed; "
         "the RGB tolerance is the maximum channel difference from its seed. The region uses 4-connected pixels; "
         "area counts occupied pixels and perimeter counts exposed pixel edges, including holes. "
@@ -886,8 +1103,10 @@ void RulerWindow::showHelp() {
         "Open History to inspect, copy or export results; it lasts until Clear or quit. "
         "Full image PNG saves the whole source; Marked crop PNG saves the annotated result. Copy rows as TSV or export CSV. "
         "Magnifier works without measurement. Shortcuts edits local key bindings. Closing hides to tray when available; Quit exits.") :
-        QStringLiteral("Выберите экран и сделайте снимок либо откройте файл. Изображение неподвижно. Выберите режим и нажмите «Измерить». "
-        "Если снимка нет, «Измерить» сначала захватит выбранный экран. Для расстояния нажмите минимум две точки; "
+        QStringLiteral("Выберите текущий экран или выход и начните захват либо откройте файл. В поддерживаемой версии Hyprland "
+        "переключите рабочий стол с закреплённым окном выбора и нажмите «Снять здесь»; «Отмена» сохранит прежний источник. "
+        "В других Wayland-сессиях даётся 5 секунд на переход. Изображение неподвижно. Выберите режим и нажмите «Измерить». "
+        "Если снимка нет, «Измерить» сначала откроет окно выбора. Для расстояния нажмите минимум две точки; "
         "перетаскивайте для свободной линии. Угол: сначала вершина, затем два луча. "
         "Область по цвету: нажмите на начальный пиксель. Допуск RGB — максимальное отклонение канала от него. "
         "Связность по 4 сторонам; площадь — число пикселей, периметр — открытые стороны пикселей, включая отверстия. "

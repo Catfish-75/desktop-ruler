@@ -250,6 +250,14 @@ int main(int argc, char** argv) {
 
         // The primary action must capture when no image exists, then expose a usable canvas.
         QTest::mouseClick(measure, Qt::LeftButton);
+        auto* picker = [&]() -> QPushButton* {
+            for (auto* top : QApplication::topLevelWidgets())
+                if (auto* button = top->findChild<QPushButton*>(QStringLiteral("captureTakeHereButton")))
+                    return button;
+            return nullptr;
+        }();
+        require(picker && picker->isVisible(), "capture picker did not open");
+        QTest::mouseClick(picker, Qt::LeftButton);
         Canvas* canvas = window.canvas();
         require(waitUntil([&] { return canvas->isVisible(); }), "primary Measure did not capture");
         require(source->text().contains(QStringLiteral("400×300")), "captured source is not identified");
