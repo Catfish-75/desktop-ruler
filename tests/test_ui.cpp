@@ -7,6 +7,7 @@
 #include <QFile>
 #include <QPainter>
 #include <QPushButton>
+#include <QSettings>
 #include <QTest>
 #include <QTemporaryDir>
 #include <QTableWidget>
@@ -53,6 +54,9 @@ static bool finishCalibration(Canvas* canvas, std::optional<QPoint> rightClick =
 
 int main(int argc, char** argv) {
     QApplication app(argc, argv);
+    QTemporaryDir settingsDir;
+    CHECK(settingsDir.isValid());
+    QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, settingsDir.path());
     Canvas canvas;
     canvas.resize(400, 300);
     QImage blank(400, 300, QImage::Format_ARGB32);

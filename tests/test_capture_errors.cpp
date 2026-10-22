@@ -6,6 +6,7 @@
 #include <QLabel>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QSettings>
 #include <QTemporaryDir>
 #include <QTest>
 #include <QTimer>
@@ -115,6 +116,9 @@ int main(int argc, char** argv) {
     QApplication app(argc, argv);
     app.setQuitOnLastWindowClosed(false);
     try {
+        QTemporaryDir settingsDir;
+        require(settingsDir.isValid(), "temporary settings directory unavailable");
+        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, settingsDir.path());
         QTemporaryDir files;
         require(files.isValid(), "temporary directory unavailable");
         QImage fixture(64, 48, QImage::Format_ARGB32);

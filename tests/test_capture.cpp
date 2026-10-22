@@ -7,6 +7,8 @@
 #include <QPainter>
 #include <QPushButton>
 #include <QScreen>
+#include <QSettings>
+#include <QTemporaryDir>
 #include <QTest>
 #include <cmath>
 #include <iostream>
@@ -38,6 +40,9 @@ int main(int argc, char** argv) {
         return 2;
     }
     try {
+        QTemporaryDir settingsDir;
+        require(settingsDir.isValid(), "temporary settings directory unavailable");
+        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, settingsDir.path());
         const QString out = argc > 1 ? QString::fromLocal8Bit(argv[1]) : QStringLiteral("artifacts");
         QDir().mkpath(out);
         Pattern pattern;

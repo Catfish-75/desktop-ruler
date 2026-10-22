@@ -26,6 +26,7 @@
 #include <QPushButton>
 #include <QSaveFile>
 #include <QScreen>
+#include <QSettings>
 #include <QShowEvent>
 #include <QScrollArea>
 #include <QSpinBox>
@@ -68,6 +69,22 @@ QString csvCell(const QString& value) {
     QString escaped = safeCell(value);
     escaped.replace('"', QStringLiteral("\"\""));
     return QStringLiteral("\"")+escaped+QStringLiteral("\"");
+}
+QSettings rulerSettings() {
+    return QSettings(QSettings::IniFormat, QSettings::UserScope,
+                     QStringLiteral("desktop-ruler"), QStringLiteral("desktop-ruler"));
+}
+bool saveCalibration(double scale, const QString& unit) {
+    auto settings = rulerSettings();
+    if (scale == 1.0 && unit == QStringLiteral("px")) {
+        settings.remove(QStringLiteral("calibration/scale"));
+        settings.remove(QStringLiteral("calibration/unit"));
+    } else {
+        settings.setValue(QStringLiteral("calibration/scale"), scale);
+        settings.setValue(QStringLiteral("calibration/unit"), unit);
+    }
+    settings.sync();
+    return settings.status() == QSettings::NoError;
 }
 bool onHyprland() {
     return QGuiApplication::platformName() == QStringLiteral("wayland") &&
@@ -408,6 +425,9 @@ RulerWindow::RulerWindow(QWidget* parent)
         scaleLabel_->setText(QStringLiteral("1 px = 1 px"));
         canvas_->setScale(scale_, scaleUnit_);
         updateAvailability();
+        if (!saveCalibration(scale_, scaleUnit_))
+            status_->setText(trText("Масштаб сброшен, но не удалось сохранить настройки",
+                                    "Scale reset, but settings could not be saved"));
     });
     connect(helpButton_, &QPushButton::clicked, this, [this] { showHelp(); });
     connect(shortcutsButton_, &QPushButton::clicked, this, [this] { shortcuts_.showSettings(english_); });
@@ -449,6 +469,18 @@ RulerWindow::RulerWindow(QWidget* parent)
     populateScreens(); setEnglish(false);
     status_->setText(trText("Готово к захвату экрана или открытию файла", "Ready to capture a screen or open an image"));
     scaleLabel_->setText(QStringLiteral("1 px = 1 px"));
+    auto calibrationSettings = rulerSettings();
+    bool validScale = false;
+    const double savedScale = calibrationSettings.value(QStringLiteral("calibration/scale")).toDouble(&validScale);
+    const QString savedUnit = calibrationSettings.value(QStringLiteral("calibration/unit")).toString().trimmed();
+    if (validScale && std::isfinite(savedScale) && savedScale > 0 &&
+        !savedUnit.isEmpty() && savedUnit.size() <= 32) {
+        scale_ = savedScale; scaleUnit_ = savedUnit;
+        scaleLabel_->setText(QStringLiteral("1 px = %1 %2").arg(scale_, 0, 'g', 9).arg(scaleUnit_));
+        canvas_->setScale(scale_, scaleUnit_);
+        unit_->setText(scaleUnit_);
+        updateAvailability();
+    }
 }
 RulerWindow::~RulerWindow() { delete capturePicker_; delete canvas_; }
 
@@ -899,7 +931,10 @@ void RulerWindow::onComplete(ruler::Measurement measurement, QVector<QPointF> po
         scaleLabel_->setText(QStringLiteral("1 px = %1 %2").arg(scale_, 0, 'g', 9).arg(scaleUnit_));
         canvas_->setScale(scale_, scaleUnit_);
         updateAvailability();
-        status_->setText(trText("Масштаб установлен", "Scale calibrated"));
+        status_->setText(saveCalibration(scale_, scaleUnit_) ?
+            trText("Масштаб установлен", "Scale calibrated") :
+            trText("Масштаб установлен, но не удалось сохранить настройки",
+                   "Scale calibrated, but settings could not be saved"));
         return;
     }
     Entry entry;
