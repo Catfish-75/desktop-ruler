@@ -643,6 +643,7 @@ void RulerWindow::updateAvailability() {
 }
 
 void RulerWindow::showControls() {
+    if (capturePending_) { cancelCapture(); return; }
     canvas_->hide();
     showNormal();
     raise(); activateWindow();
@@ -775,6 +776,7 @@ void RulerWindow::confirmCapture() {
     captureTakeButton_ = nullptr;
     capturePickerLabel_ = nullptr;
     captureFallback_ = false;
+    hide(); canvas_->hide();
     picker->hide(); picker->deleteLater();
     QTimer::singleShot(350, this, [this, screen] { captureScreen(screen); });
 }

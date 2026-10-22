@@ -150,8 +150,12 @@ int main(int argc, char** argv) {
         QTest::qWait(2200);
         require(pickerTakeButton() && invocationCount(calls) == 0,
                 "old fallback timer confirmed the newer picker");
-        QTest::mouseClick(pickerCancelButton(), Qt::LeftButton);
-        require(waitUntil([&] { return window.isVisible(); }), "second Cancel did not restore controls");
+        // A stale route that asks to show controls during capture must abort
+        // the picker instead of leaving controls behind its eventual screenshot.
+        window.canvas()->cancel();
+        require(waitUntil([&] { return window.isVisible() && !pickerTakeButton(); }) &&
+                invocationCount(calls) == 0,
+                "show-controls route left a pending picker or captured the app");
 
         qputenv("RULER_TEST_GRIM_MODE", "failure");
         QString warning;
