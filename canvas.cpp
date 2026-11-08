@@ -486,6 +486,20 @@ void Canvas::paintEvent(QPaintEvent*) {
     p.save();
     p.translate(r.topLeft());
     p.scale(r.width()/image_.width(), r.height()/image_.height());
+    const bool pathMode = mode_ == ruler::Mode::Path || mode_ == ruler::Mode::Calibrate ||
+                          mode_ == ruler::Mode::Area || mode_ == ruler::Mode::Perimeter;
+    const bool anglePreview = mode_ == ruler::Mode::Angle && points_.size() < 3;
+    if (!screenshotSelection_ && hasCursor_ && !points_.isEmpty() && (pathMode || anglePreview)) {
+        const QPointF start = anglePreview ? points_.first() : points_.last();
+        // Cosmetic pens keep the preview readable at any image scale. Both
+        // strokes use the same pixel dash lengths, including the dark outline.
+        QPen outline(QColor(10, 20, 23, 230), 5, Qt::CustomDashLine, Qt::FlatCap);
+        outline.setCosmetic(true); outline.setDashPattern({3, 2});
+        p.setPen(outline); p.drawLine(start, cursor_);
+        QPen guide(QColor(255, 207, 74), 2.5, Qt::CustomDashLine, Qt::FlatCap);
+        guide.setCosmetic(true); guide.setDashPattern({6, 4});
+        p.setPen(guide); p.drawLine(start, cursor_);
+    }
     drawMarks(p, points_, mode_, mask_);
     p.restore();
     if (screenshotSelection_ && screenshotHasAnchor_) {

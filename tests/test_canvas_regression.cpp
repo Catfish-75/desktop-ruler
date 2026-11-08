@@ -62,6 +62,34 @@ int main(int argc, char** argv) {
     CHECK(controls->geometry().right() >= canvas.width()-18);
     canvas.setLanguage(true);
 
+    // Pending segments are dashed on the canvas, but never baked into exports.
+    {
+        Canvas guide;
+        guide.resize(800, 600);
+        QImage source(800, 600, QImage::Format_ARGB32); source.fill(Qt::black);
+        guide.setImage(source); guide.show();
+        CHECK(QTest::qWaitForWindowExposed(&guide));
+        for (auto mode : {ruler::Mode::Path, ruler::Mode::Calibrate}) {
+            guide.setMode(mode);
+            QTest::mouseMove(&guide, QPoint(600, 300));
+            QTest::mouseClick(&guide, Qt::LeftButton, Qt::NoModifier, QPoint(100, 200));
+            QTest::mouseMove(&guide, QPoint(500, 200));
+            settle();
+            const QImage view = guide.grab().toImage();
+            int dashes = 0, gaps = 0;
+            for (int x=130; x<450; ++x) {
+                const QColor c = view.pixelColor(x, 200);
+                if (c.red()>200 && c.green()>150 && c.blue()<120) ++dashes;
+                if (c == QColor(Qt::black)) ++gaps;
+            }
+            CHECK(dashes > 50 && gaps > 30);
+            const QImage exported = guide.annotatedImage({QPointF(100,200)}, mode, {});
+            CHECK(exported.width() < 200);
+            CHECK(exported.pixelColor(exported.width()-10, exported.height()/2) == QColor(Qt::black));
+        }
+        guide.hide();
+    }
+
     int errors = 0;
     QString lastError;
     int completed = 0;
