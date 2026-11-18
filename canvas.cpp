@@ -546,7 +546,8 @@ void Canvas::paintEvent(QPaintEvent*) {
         QFont f = font(); f.setPointSize(11); f.setBold(true); p.setFont(f);
         const QRect bounds = p.fontMetrics().boundingRect(QRect(16, 0, width()-32, 90),
             Qt::TextWordWrap, hud).adjusted(-11,-7,11,7);
-        QRect panel = bounds.translated(0, 17);
+        const int top = controls_->isVisible() ? controls_->geometry().bottom()+8 : 10;
+        QRect panel = bounds.translated(0, top-bounds.top());
         p.fillRect(panel, QColor(9, 20, 24, 220));
         p.setPen(QColor(255, 236, 178));
         p.drawText(panel.adjusted(11,7,-11,-7), Qt::TextWordWrap, hud);

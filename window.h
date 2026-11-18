@@ -16,6 +16,7 @@ class QPushButton;
 class QTableWidget;
 class QSystemTrayIcon;
 class QAction;
+class QMenu;
 class QCloseEvent;
 class QShowEvent;
 class QScreen;
@@ -81,6 +82,8 @@ private:
     QString modeHint(ruler::Mode mode) const;
     void setEnglish(bool english);
     void showHelp();
+    void populateMoreMenu(QMenu* menu);
+    void applyAppearance();
     QString displayError(const QString& error) const;
     QString trText(const char* ru, const char* en) const;
     Canvas* canvas_;
@@ -97,7 +100,7 @@ private:
     QTableWidget* history_;
     QPushButton *captureButton_, *openButton_, *measureButton_, *historyButton_, *optionsButton_, *resetButton_,
         *showButton_, *saveButton_, *saveSourceButton_, *regionButton_, *copyButton_, *copyAllButton_,
-        *csvButton_, *clearButton_, *helpButton_, *shortcutsButton_, *hideButton_, *quitButton_;
+        *csvButton_, *clearButton_, *moreButton_;
     QSystemTrayIcon* tray_ = nullptr;
     QAction *trayShow_ = nullptr, *trayCapture_ = nullptr, *trayHide_ = nullptr, *trayQuit_ = nullptr;
     QVector<Entry> entries_;

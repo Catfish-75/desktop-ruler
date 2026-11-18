@@ -3,6 +3,7 @@
 #include "../window.h"
 
 #include <QApplication>
+#include <QAction>
 #include <QComboBox>
 #include <QDialogButtonBox>
 #include <QDialog>
@@ -157,7 +158,7 @@ bool finishCalibration(QToolButton* done, double length, const QString& unit,
 
 void checkActionsInside(QWidget& window) {
     for (const char* name : {"measureButton", "historyButton", "saveSourceButton",
-                             "screenshotRegionButton", "helpButton", "shortcutsButton", "quitButton"}) {
+                             "screenshotRegionButton", "moreButton"}) {
         auto* button = named<QPushButton>(window, name);
         const QRect inWindow(button->mapTo(&window, QPoint(0, 0)), button->size());
         require(button->isVisible() && inWindow.left() >= 0 && inWindow.top() >= 0 &&
@@ -383,6 +384,32 @@ int main(int argc, char** argv) {
         language->setCurrentIndex(0);
         require(result->text().startsWith(QStringLiteral("Последний результат:")),
                 "Russian result heading not restored");
+
+        auto panelColor = [](RulerWindow& ruler) {
+            return named<QWidget>(ruler, "rulerPanel")->grab().toImage().pixelColor(3, 3);
+        };
+        const QColor dayBackground = panelColor(window);
+        const QString resultBeforeTheme = result->text();
+        auto* night = window.findChild<QAction*>(QStringLiteral("nightMode"));
+        auto* accent = window.findChild<QAction*>(QStringLiteral("appearance/accent1"));
+        auto* backdrop = window.findChild<QAction*>(QStringLiteral("appearance/background2"));
+        require(night && accent && backdrop, "appearance choices missing from menu");
+        night->trigger();
+        const QColor nightBackground = panelColor(window);
+        require(nightBackground.lightness() < dayBackground.lightness(), "night mode did not darken panel");
+        accent->trigger();
+        require(panelColor(window) == nightBackground, "accent changed the background");
+        backdrop->trigger();
+        const QColor selectedBackground = panelColor(window);
+        require(selectedBackground != nightBackground && result->text() == resultBeforeTheme,
+                "background change failed or changed the result");
+        RulerWindow restarted;
+        restarted.show();
+        require(panelColor(restarted) == selectedBackground &&
+                restarted.findChild<QAction*>(QStringLiteral("nightMode"))->isChecked() &&
+                restarted.findChild<QAction*>(QStringLiteral("appearance/accent1"))->isChecked() &&
+                restarted.findChild<QAction*>(QStringLiteral("appearance/background2"))->isChecked(),
+                "appearance was not restored");
 
         window.hide();
         canvas->hide();

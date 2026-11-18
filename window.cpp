@@ -20,6 +20,8 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QMenu>
+#include <QActionGroup>
+#include <QPalette>
 #include <QMessageBox>
 #include <QProcess>
 #include <QPointer>
@@ -185,14 +187,15 @@ RulerWindow::RulerWindow(QWidget* parent)
     const QIcon icon = QIcon::fromTheme(QStringLiteral("desktop-ruler"),
                                       QIcon::fromTheme(QStringLiteral("accessories-calculator")));
     setWindowIcon(icon);
-    resize(620, 350);
+    resize(520, 400);
     auto* scroll = new QScrollArea(this);
     scroll->setWidgetResizable(true);
     scroll->setFrameShape(QFrame::NoFrame);
     auto* central = new QWidget(scroll);
+    central->setObjectName(QStringLiteral("rulerPanel"));
     auto* root = new QVBoxLayout(central);
-    root->setContentsMargins(12, 5, 12, 5);
-    root->setSpacing(3);
+    root->setContentsMargins(14, 10, 14, 10);
+    root->setSpacing(5);
     scroll->setWidget(central);
     setCentralWidget(scroll);
 
@@ -201,7 +204,11 @@ RulerWindow::RulerWindow(QWidget* parent)
     captureButton_ = new QPushButton; openButton_ = new QPushButton;
     languageBox_ = new QComboBox;
     languageBox_->addItems({QStringLiteral("Русский"), QStringLiteral("English")});
-    top->addWidget(screenBox_, 1); top->addWidget(languageBox_);
+    moreButton_ = new QPushButton(QStringLiteral("⋯"));
+    moreButton_->setObjectName(QStringLiteral("moreButton"));
+    auto* menu = new QMenu(moreButton_);
+    moreButton_->setMenu(menu);
+    top->addWidget(screenBox_, 1); top->addWidget(languageBox_); top->addWidget(moreButton_);
     root->addLayout(top);
     auto* sourceButtons = new QHBoxLayout;
     sourceButtons->addWidget(captureButton_); sourceButtons->addWidget(openButton_);
@@ -248,9 +255,9 @@ RulerWindow::RulerWindow(QWidget* parent)
     resultLayout->setContentsMargins(0, 0, 0, 0);
     resultLayout->setSpacing(3);
     resultLabel_ = new QLabel;
-    resultLabel_->setFrameShape(QFrame::StyledPanel);
-    resultLabel_->setMargin(5);
-    QFont resultFont = resultLabel_->font(); resultFont.setBold(true); resultLabel_->setFont(resultFont);
+    resultLabel_->setMargin(9);
+    QFont resultFont = resultLabel_->font(); resultFont.setBold(true);
+    resultFont.setPointSizeF(resultFont.pointSizeF() * 1.2); resultLabel_->setFont(resultFont);
     resultLabel_->setWordWrap(true);
     resultLayout->addWidget(resultLabel_);
     auto* nameRow = new QHBoxLayout;
@@ -260,11 +267,11 @@ RulerWindow::RulerWindow(QWidget* parent)
     resultWidget_->hide();
     measureButton_ = new QPushButton;
     status_ = new QLabel;
+    status_->setWordWrap(true);
     root->addWidget(status_);
     historyButton_ = new QPushButton;
     auto* actionRow = new QHBoxLayout;
-    actionRow->addWidget(measureButton_); actionRow->addWidget(historyButton_);
-    actionRow->addStretch(1);
+    actionRow->addWidget(measureButton_, 1); actionRow->addWidget(historyButton_);
     root->addLayout(actionRow);
     historyPanel_ = new QWidget;
     auto* historyLayout = new QVBoxLayout(historyPanel_);
@@ -334,13 +341,6 @@ RulerWindow::RulerWindow(QWidget* parent)
     });
     connect(calibrationButtons_, &QDialogButtonBox::rejected, calibrationDialog_, &QDialog::reject);
     root->addStretch(1);
-    auto* footer = new QHBoxLayout;
-    helpButton_ = new QPushButton; shortcutsButton_ = new QPushButton;
-    hideButton_ = new QPushButton; quitButton_ = new QPushButton;
-    footer->addWidget(helpButton_); footer->addWidget(shortcutsButton_); footer->addStretch(1);
-    footer->addWidget(hideButton_); footer->addWidget(quitButton_);
-    root->addLayout(footer);
-
     auto identify = [](QWidget* widget, const char* name) {
         widget->setObjectName(QString::fromLatin1(name));
     };
@@ -360,9 +360,7 @@ RulerWindow::RulerWindow(QWidget* parent)
     identify(regionButton_, "screenshotRegionButton");
     identify(saveSourceButton_, "saveSourceButton"); identify(copyButton_, "copySelectedButton");
     identify(copyAllButton_, "copyAllButton"); identify(csvButton_, "exportCsvButton");
-    identify(clearButton_, "clearHistoryButton"); identify(helpButton_, "helpButton");
-    identify(shortcutsButton_, "shortcutsButton");
-    identify(hideButton_, "hideToTrayButton"); identify(quitButton_, "quitButton");
+    identify(clearButton_, "clearHistoryButton");
 
     connect(label_, &QLineEdit::editingFinished, this, [this] { setLabel(label_->text()); });
     connect(historyButton_, &QPushButton::clicked, this, [this] {
@@ -427,13 +425,6 @@ RulerWindow::RulerWindow(QWidget* parent)
             status_->setText(trText("Масштаб сброшен, но не удалось сохранить настройки",
                                     "Scale reset, but settings could not be saved"));
     });
-    connect(helpButton_, &QPushButton::clicked, this, [this] { showHelp(); });
-    connect(shortcutsButton_, &QPushButton::clicked, this, [this] { shortcuts_.showSettings(english_); });
-    connect(hideButton_, &QPushButton::clicked, this, [this] {
-        if (QSystemTrayIcon::isSystemTrayAvailable()) hide();
-        else { hideButton_->hide(); status_->setText(trText("Системный трей недоступен", "System tray is unavailable")); }
-    });
-    connect(quitButton_, &QPushButton::clicked, this, [this] { quitApplication(); });
     connect(languageBox_, &QComboBox::currentIndexChanged, this, [this](int index) { setEnglish(index == 1); });
     connect(zoom_, &QSpinBox::valueChanged, canvas_, &Canvas::setMagnifierZoom);
     connect(tolerance_, &QSpinBox::valueChanged, canvas_, &Canvas::setTolerance);
@@ -463,8 +454,8 @@ RulerWindow::RulerWindow(QWidget* parent)
             }
         });
     }
-    hideButton_->setVisible(tray_ && tray_->isVisible());
     populateScreens(); setEnglish(false);
+    applyAppearance();
     status_->setText(trText("Готово к захвату экрана или открытию файла", "Ready to capture a screen or open an image"));
     scaleLabel_->setText(QStringLiteral("1 px = 1 px"));
     auto calibrationSettings = rulerSettings();
@@ -488,7 +479,7 @@ void RulerWindow::showEvent(QShowEvent* event) {
 QSize RulerWindow::controlWindowSize() const {
     const int height = !historyPanel_->isHidden() ? 620 : (entries_.isEmpty() ? 350 : 420);
     const QSize available = screen() ? screen()->availableGeometry().size() : QSize(800, 640);
-    return QSize(std::min(620, std::max(380, available.width() - 40)),
+    return QSize(std::min(historyPanel_->isHidden() ? 520 : 620, std::max(380, available.width() - 40)),
                  std::min(height, std::max(300, available.height() - 40)));
 }
 
@@ -524,6 +515,101 @@ void RulerWindow::quitApplication() {
 QString RulerWindow::trText(const char* ru, const char* en) const {
     return QString::fromUtf8(english_ ? en : ru);
 }
+void RulerWindow::populateMoreMenu(QMenu* menu) {
+    qDeleteAll(menu->findChildren<QMenu*>(QString(), Qt::FindDirectChildrenOnly));
+    menu->clear();
+    auto* appearance = menu->addMenu(trText("Оформление", "Appearance"));
+    auto settings = rulerSettings();
+    auto* night = appearance->addAction(trText("Ночной режим", "Night mode"));
+    night->setObjectName(QStringLiteral("nightMode"));
+    night->setCheckable(true);
+    night->setChecked(settings.value(QStringLiteral("appearance/night"), false).toBool());
+    connect(night, &QAction::toggled, this, [this](bool checked) {
+        rulerSettings().setValue(QStringLiteral("appearance/night"), checked);
+        applyAppearance();
+    });
+
+    const auto choices = [this, &settings, appearance](const QString& title, const QString& key,
+                                                       const QStringList& names) {
+        auto* submenu = appearance->addMenu(title);
+        auto* group = new QActionGroup(submenu);
+        const int current = qBound(0, settings.value(key, 0).toInt(), names.size()-1);
+        for (int i = 0; i < names.size(); ++i) {
+            auto* action = submenu->addAction(names[i]);
+            action->setObjectName(key + QString::number(i));
+            action->setCheckable(true);
+            group->addAction(action);
+            action->setChecked(i == current);
+            connect(action, &QAction::triggered, this, [this, key, i] {
+                rulerSettings().setValue(key, i);
+                applyAppearance();
+            });
+        }
+    };
+    choices(trText("Акцент", "Accent"), QStringLiteral("appearance/accent"),
+            {trText("Бирюза", "Turquoise"), trText("Сирень", "Lilac"), trText("Коралл", "Coral")});
+    choices(trText("Фон панели", "Panel background"), QStringLiteral("appearance/background"),
+            {trText("Фарфор", "Porcelain"), trText("Лагуна", "Lagoon"), trText("Персик", "Peach")});
+    menu->addSeparator();
+    menu->addAction(trText("Справка", "Help"), this, [this] { showHelp(); });
+    menu->addAction(trText("Сочетания клавиш", "Shortcuts"), this, [this] { shortcuts_.showSettings(english_); });
+    if (tray_ && tray_->isVisible())
+        menu->addAction(trText("Свернуть в трей", "Hide to tray"), this, [this] { hide(); });
+    menu->addAction(trText("Выход", "Quit"), this, [this] { quitApplication(); });
+}
+
+void RulerWindow::applyAppearance() {
+    const auto settings = rulerSettings();
+    const bool night = settings.value(QStringLiteral("appearance/night"), false).toBool();
+    const int accentIndex = qBound(0, settings.value(QStringLiteral("appearance/accent"), 0).toInt(), 2);
+    const int backgroundIndex = qBound(0, settings.value(QStringLiteral("appearance/background"), 0).toInt(), 2);
+    const char* lightBackgrounds[] = {"#f4f6fb", "#e0f4ef", "#fff0e5"};
+    const char* darkBackgrounds[] = {"#192331", "#152c2b", "#302126"};
+    const char* lightAccents[] = {"#116b72", "#6f42ad", "#a63f52"};
+    const char* darkAccents[] = {"#87e5d4", "#d3b2ff", "#ffb4b4"};
+    const QColor background(night ? darkBackgrounds[backgroundIndex] : lightBackgrounds[backgroundIndex]);
+    const QColor accent(night ? darkAccents[accentIndex] : lightAccents[accentIndex]);
+    const QColor ink(night ? "#f0f4fc" : "#182636");
+    const QColor accentInk(night ? "#142130" : "#ffffff");
+    const QColor surface(night ? "#253344" : "#ffffff");
+    const QColor edge(night ? "#56677c" : "#b9c5d4");
+    QPalette colors = QApplication::palette();
+    colors.setColor(QPalette::Window, background);
+    colors.setColor(QPalette::WindowText, ink);
+    colors.setColor(QPalette::Base, surface);
+    colors.setColor(QPalette::AlternateBase, background);
+    colors.setColor(QPalette::Text, ink);
+    colors.setColor(QPalette::Button, surface);
+    colors.setColor(QPalette::ButtonText, ink);
+    colors.setColor(QPalette::Highlight, accent);
+    colors.setColor(QPalette::HighlightedText, accentInk);
+    colors.setColor(QPalette::ToolTipBase, surface);
+    colors.setColor(QPalette::ToolTipText, ink);
+    for (auto role : {QPalette::WindowText, QPalette::Text, QPalette::ButtonText})
+        colors.setColor(QPalette::Disabled, role, QColor(night ? "#9caec2" : "#5c6877"));
+    setStyleSheet(QStringLiteral(
+        "QWidget#rulerPanel, QDialog { background-color: %4; }"
+        "QPushButton { background: %6; color: %5;"
+        " border: 1px solid %1; border-radius: 6px; padding: 4px 8px; }"
+        "QPushButton:hover, QPushButton:focus { border-color: %2; }"
+        "QPushButton:pressed { background: %4; }"
+        "QPushButton:disabled { color: %7; }"
+        "QPushButton#measureButton:enabled { background: %2; color: %3; font-weight: bold; }"
+        "QPushButton#measureButton:focus { border-color: %3; }"
+        "QLabel { color: %5; }"
+        "QComboBox, QLineEdit, QAbstractSpinBox, QTableView, QHeaderView::section {"
+        " background: %6; color: %5; selection-background-color: %2; selection-color: %3; }"
+        "QComboBox QAbstractItemView { background: %6; color: %5;"
+        " selection-background-color: %2; selection-color: %3; }"
+        "QLabel#latestResult { background: %6; border: 1px solid %1; border-radius: 8px; }"
+        "QMenu { background: %6; color: %5; border: 1px solid %1; }"
+        "QMenu::item:selected { background: %2; color: %3; }"
+    ).arg(edge.name(), accent.name(), accentInk.name(), background.name(),
+          ink.name(), surface.name(), colors.color(QPalette::Disabled, QPalette::ButtonText).name()));
+    setPalette(colors);
+    calibrationDialog_->setPalette(colors);
+}
+
 void RulerWindow::setEnglish(bool english) {
     english_ = english;
     populateScreens();
@@ -540,10 +626,9 @@ void RulerWindow::setEnglish(bool english) {
     copyAllButton_->setText(trText("Копия всех", "Copy all"));
     csvButton_->setText(trText("Экспорт CSV", "Export CSV"));
     clearButton_->setText(trText("Очистить историю", "Clear history"));
-    helpButton_->setText(trText("Справка", "Help"));
-    shortcutsButton_->setText(trText("Сочетания", "Shortcuts"));
-    hideButton_->setText(trText("Свернуть в трей", "Hide to tray"));
-    quitButton_->setText(trText("Выход", "Quit"));
+    populateMoreMenu(moreButton_->menu());
+    moreButton_->setAccessibleName(trText("Меню приложения", "Application menu"));
+    moreButton_->setToolTip(trText("Оформление, справка и выход", "Appearance, help and quit"));
     resetButton_->setText(trText("Сбросить в пиксели", "Reset to pixels"));
     calibrationDialog_->setWindowTitle(trText("Калибровка масштаба", "Calibrate scale"));
     calibrationButtons_->button(QDialogButtonBox::Ok)->setText(trText("Применить", "Apply"));
@@ -574,8 +659,8 @@ void RulerWindow::setEnglish(bool english) {
 QString RulerWindow::modeHint(ruler::Mode mode) const {
     switch (mode) {
     case ruler::Mode::Path:
-        return trText("Отметьте начало и нажмите правой кнопкой на конце или поставьте две точки и нажмите «Готово». Backspace отменяет штрих.",
-                      "Mark a start, then right-click the endpoint, or click two points and press Done. Backspace undoes a stroke.");
+        return trText("Левый щелчок ставит точку. Правый завершает замер.",
+                      "Left click adds a point. Right click finishes the measurement.");
     case ruler::Mode::Area:
     case ruler::Mode::Perimeter:
         return trText("Левой кнопкой поставьте минимум три поворотные точки, правой замкните контур и завершите. Backspace отменяет штрих.",
@@ -659,7 +744,7 @@ void RulerWindow::updateAvailability() {
     measureButton_->setToolTip(measureButton_->isEnabled() ? modeHint(static_cast<ruler::Mode>(modeBox_->currentData().toInt())) : noScreen);
     for (auto* button : {captureButton_, openButton_, measureButton_, historyButton_, optionsButton_, resetButton_,
                          showButton_, saveButton_, saveSourceButton_, regionButton_, copyButton_, copyAllButton_,
-                         csvButton_, clearButton_, helpButton_, shortcutsButton_, hideButton_, quitButton_})
+                         csvButton_, clearButton_})
         button->setAccessibleName(button->text());
     screenBox_->setAccessibleName(trText("Выбор экрана", "Screen selection"));
     languageBox_->setAccessibleName(trText("Язык", "Language"));
@@ -726,6 +811,7 @@ void RulerWindow::capture() {
     capturePending_ = true;
     hide(); canvas_->hide();
     capturePicker_ = new QDialog(nullptr, Qt::Window | Qt::WindowCloseButtonHint | Qt::WindowStaysOnTopHint);
+    capturePicker_->setPalette(palette());
     capturePicker_->setWindowTitle(QStringLiteral("Desktop Ruler · capture picker"));
     capturePicker_->setFixedSize(410, 170);
     auto* layout = new QVBoxLayout(capturePicker_);
@@ -947,7 +1033,7 @@ void RulerWindow::onComplete(ruler::Measurement measurement, QVector<QPointF> po
     history_->selectRow(entries_.size()-1);
     label_->setText(entry.name);
     historyPanel_->hide();
-    status_->setText(resultText(entry));
+    status_->clear();
     showControls();
     measureButton_->setFocus();
 }
@@ -955,10 +1041,14 @@ QString RulerWindow::resultText(const Entry& entry) const {
     const auto& m = entry.raw;
     if (entry.kind == ruler::Mode::Angle) return QString::number(m.angle, 'f', 2)+QStringLiteral("°");
     if (entry.kind == ruler::Mode::Count) return QString::number(m.count);
-    if (entry.kind == ruler::Mode::Area || entry.kind == ruler::Mode::AutoArea)
+    const bool pixels = entry.scale == 1.0 && entry.unit == QStringLiteral("px");
+    if (entry.kind == ruler::Mode::Area || entry.kind == ruler::Mode::AutoArea) {
+        if (pixels) return QStringLiteral("%1 px² · %2 px").arg(m.area,0,'f',2).arg(m.length,0,'f',2);
         return QStringLiteral("%1 px² · %2 %3² · %4 px / %5 %3")
             .arg(m.area,0,'f',2).arg(m.area*entry.scale*entry.scale,0,'f',2)
             .arg(entry.unit).arg(m.length,0,'f',2).arg(m.length*entry.scale,0,'f',2);
+    }
+    if (pixels) return QStringLiteral("%1 px").arg(m.length,0,'f',2);
     return QStringLiteral("%1 px · %2 %3").arg(m.length,0,'f',2)
         .arg(m.length*entry.scale,0,'f',2).arg(entry.unit);
 }
