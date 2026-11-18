@@ -422,9 +422,7 @@ RulerWindow::RulerWindow(QWidget* parent)
     });
     connect(resetButton_, &QPushButton::clicked, this, [this] {
         scale_ = 1; scaleUnit_ = QStringLiteral("px");
-        scaleLabel_->setText(QStringLiteral("1 px = 1 px"));
-        canvas_->setScale(scale_, scaleUnit_);
-        updateAvailability();
+        refreshScale();
         if (!saveCalibration(scale_, scaleUnit_))
             status_->setText(trText("Масштаб сброшен, но не удалось сохранить настройки",
                                     "Scale reset, but settings could not be saved"));
@@ -476,10 +474,8 @@ RulerWindow::RulerWindow(QWidget* parent)
     if (validScale && std::isfinite(savedScale) && savedScale > 0 &&
         !savedUnit.isEmpty() && savedUnit.size() <= 32) {
         scale_ = savedScale; scaleUnit_ = savedUnit;
-        scaleLabel_->setText(QStringLiteral("1 px = %1 %2").arg(scale_, 0, 'g', 9).arg(scaleUnit_));
-        canvas_->setScale(scale_, scaleUnit_);
         unit_->setText(scaleUnit_);
-        updateAvailability();
+        refreshScale();
     }
 }
 RulerWindow::~RulerWindow() { delete capturePicker_; delete canvas_; }
@@ -615,6 +611,12 @@ void RulerWindow::updateModeControls() {
 
 void RulerWindow::updateHints() {
     hintLabel_->setText(modeHint(static_cast<ruler::Mode>(modeBox_->currentData().toInt())));
+}
+
+void RulerWindow::refreshScale() {
+    scaleLabel_->setText(QStringLiteral("1 px = %1 %2").arg(scale_, 0, 'g', 9).arg(scaleUnit_));
+    canvas_->setScale(scale_, scaleUnit_);
+    updateAvailability();
 }
 
 void RulerWindow::updateAvailability() {
@@ -928,9 +930,7 @@ void RulerWindow::onComplete(ruler::Measurement measurement, QVector<QPointF> po
         const double next = ruler::unitsPerPixel(knownLength_->value(), measurement.length);
         if (next <= 0) return;
         scale_ = next; scaleUnit_ = unit_->text().trimmed();
-        scaleLabel_->setText(QStringLiteral("1 px = %1 %2").arg(scale_, 0, 'g', 9).arg(scaleUnit_));
-        canvas_->setScale(scale_, scaleUnit_);
-        updateAvailability();
+        refreshScale();
         status_->setText(saveCalibration(scale_, scaleUnit_) ?
             trText("Масштаб установлен", "Scale calibrated") :
             trText("Масштаб установлен, но не удалось сохранить настройки",

@@ -72,6 +72,7 @@ private:
     void selectScreenshotRegion();
     void quitApplication();
     void updateModeControls();
+    void refreshScale();
     void updateAvailability();
     void updateHints();
     void showHistory();
